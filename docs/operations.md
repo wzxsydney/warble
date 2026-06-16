@@ -13,7 +13,7 @@ bin/warble logs                # interleaved colored tail of all logs
 bin/warble logs server         # tail one service's log
 bin/warble transcript          # conversation view, mood chip per reply
 bin/warble sessions            # list live WS sessions   (needs WARBLE_DEBUG=1)
-bin/warble say "text..."       # inject a turn — hands-free testing (needs WARBLE_DEBUG=1)
+bin/warble say "text..."       # inject a turn, hands-free testing (needs WARBLE_DEBUG=1)
 bin/warble babysit server      # poll every 10s, restart if dead
 ```
 
@@ -37,9 +37,9 @@ Docker / natively and set `OLLAMA_MODE=external`).
 
 ## Ollama modes (`OLLAMA_MODE`)
 
-- `external` (default) — you run Ollama; `bin/warble` only health-checks `:11434`.
-- `serve` — `bin/warble` runs `ollama serve` as a child process.
-- `brew` — macOS Homebrew: drives `brew services start/stop ollama`.
+- `external` (default), you run Ollama; `bin/warble` only health-checks `:11434`.
+- `serve`, `bin/warble` runs `ollama serve` as a child process.
+- `brew`, macOS Homebrew: drives `brew services start/stop ollama`.
 
 ## Status states and colors
 
@@ -72,7 +72,7 @@ window is a few seconds per interaction. Trigger the device (wake word or screen
 tap) first, then fire `say` immediately, or use `say --wait` to block until a
 session appears.
 
-## Device serial — `bin/serial`
+## Device serial, `bin/serial`
 
 Helper for reading the device's USB serial log. The CoreS3 enumerates as
 `/dev/cu.usbmodem*` on macOS and `/dev/ttyACM*` on Linux. Set `STACKCHAN_PORT`

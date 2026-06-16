@@ -24,16 +24,17 @@ have() { command -v "$1" >/dev/null 2>&1; }
 ask()  { printf "${B}%s${X} [y/N] " "$1"; read -r _a </dev/tty 2>/dev/null || _a=n; case "$_a" in y|Y|yes|YES) return 0;; *) return 1;; esac; }
 
 COMPOSE=""
+# Require Compose v2 (the `docker compose` plugin). The legacy `docker-compose` v1
+# is EOL and lacks --wait / --no-log-prefix that this script relies on.
 detect_compose() {
-    if have docker && docker compose version >/dev/null 2>&1; then COMPOSE="docker compose"; return 0
-    elif have docker-compose; then COMPOSE="docker-compose"; return 0
-    else return 1; fi
+    if have docker && docker compose version >/dev/null 2>&1; then COMPOSE="docker compose"; return 0; fi
+    return 1
 }
 
 # Returns a human-readable problem with Docker, or nothing if it's usable.
 docker_problem() {
     have docker || { echo "Docker isn't installed. Run ./warble start to set it up."; return; }
-    detect_compose || { echo "Docker Compose isn't available. Install the Docker Compose plugin."; return; }
+    detect_compose || { echo "Docker Compose v2 is required (the 'docker compose' plugin). Update Docker, then retry."; return; }
     err="$(docker info 2>&1 >/dev/null)"
     [ -z "$err" ] && return
     if printf '%s' "$err" | grep -qi "permission denied"; then
@@ -186,7 +187,13 @@ cmd_start() {
     fi
 
     say "Fetching speech models (whisper + a Piper voice; large on first run only)"
-    bash scripts/fetch-models.sh
+    # Pass the configured voice/model from .env so what's fetched matches what compose
+    # mounts. .env uses WHISPER_MODEL_FILE (e.g. ggml-base.bin); fetch wants the bare name.
+    local wfile wname pvoice
+    wfile="$(grep -E '^WHISPER_MODEL_FILE=' .env 2>/dev/null | cut -d= -f2-)"; wfile="${wfile:-ggml-base.bin}"
+    wname="${wfile#ggml-}"; wname="${wname%.bin}"
+    pvoice="$(grep -E '^PIPER_VOICE=' .env 2>/dev/null | cut -d= -f2-)"; pvoice="${pvoice:-en_US-lessac-medium}"
+    WHISPER_MODEL_NAME="$wname" PIPER_VOICE="$pvoice" bash scripts/fetch-models.sh
 
     # Prefer prebuilt images (fast). Build locally only if --build was passed or
     # the images can't be pulled (private/unauthenticated, offline, or not published).
@@ -319,7 +326,7 @@ cmd_status() {
     oll_up=1; model_present=1
     if [ "$server_rc" = "0" ]; then
         tags="$($COMPOSE exec -T server sh -c 'curl -fsS "$WARBLE_OLLAMA_URL/api/tags"' 2>/dev/null)"
-        if [ -n "$tags" ]; then oll_up=0; printf '%s' "$tags" | grep -q "\"$model\"" && model_present=0; fi
+        if [ -n "$tags" ]; then oll_up=0; [ -n "$model" ] && printf '%s' "$tags" | grep -q "\"$model\"" && model_present=0; fi
     fi
     # The bundled Ollama is under a compose profile, so query it with the profile
     # active (plain 'ps ollama' hides profile services).

@@ -8,7 +8,7 @@ flags the one license boundary that matters for redistribution.
 | Component | Role in warble | License | Notes |
 |---|---|---|---|
 | [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) | Device firmware + the WebSocket/OTA protocol warble implements | MIT | warble speaks its protocol; no code vendored. Protocol docs: [`websocket.md`](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md), [`mcp-protocol.md`](https://github.com/78/xiaozhi-esp32/blob/main/docs/mcp-protocol.md) |
-| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) | Speech-to-text (`whisper-server`) | MIT | Installed/built by the user, or run from `ghcr.io/ggml-org/whisper.cpp` |
+| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) | Speech-to-text (`whisper-server`) | MIT | Compiled from a pinned source tag in warble's whisper image (the official image ships the CLI, not the server) |
 | [Silero VAD](https://github.com/snakers4/silero-vad) | Voice activity detection (model + `silero-vad` pip package) | MIT | |
 | [Piper](https://github.com/OHF-Voice/piper1-gpl) (`piper-tts`) | Text-to-speech engine | **GPL-3.0** | See the boundary note below |
 | [Piper voices](https://huggingface.co/rhasspy/piper-voices) | TTS voice models (`*.onnx`) | MIT (per-voice; check the model card) | Downloaded by the user |
@@ -17,9 +17,9 @@ flags the one license boundary that matters for redistribution.
 
 ## Go dependencies (all permissive)
 
-- [`github.com/coder/websocket`](https://github.com/coder/websocket) — ISC
-- [`github.com/google/uuid`](https://github.com/google/uuid) — BSD-3-Clause
-- [`gopkg.in/hraban/opus.v2`](https://github.com/hraban/opus) — MIT (wraps libopus, BSD-3-Clause)
+- [`github.com/coder/websocket`](https://github.com/coder/websocket), ISC
+- [`github.com/google/uuid`](https://github.com/google/uuid), BSD-3-Clause
+- [`gopkg.in/hraban/opus.v2`](https://github.com/hraban/opus), MIT (wraps libopus, BSD-3-Clause)
 
 ## The Piper GPL boundary (read before publishing a Docker image)
 

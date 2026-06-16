@@ -1,5 +1,9 @@
 # warble
 
+![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+![platform: Linux | macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)
+![status: beta](https://img.shields.io/badge/status-beta-orange)
+
 A fully local AI voice backend for the [M5Stack StackChan](https://docs.m5stack.com/en/stackchan)
 desktop robot. It replaces the `xiaozhi.me` cloud so the robot hears, thinks, and
 speaks entirely on your own hardware: no cloud account, no API keys, no audio
@@ -33,9 +37,12 @@ The server also sets the robot's face from an emotion tag in each reply.
 
 ## What you need
 
+warble runs on **Linux or macOS**. (Windows is not supported: it's bash-based and
+talks to Unix serial ports for flashing the robot.)
+
 - An M5Stack StackChan (CoreS3) running its `xiaozhi-esp32` AI-agent firmware.
-- A computer on the same Wi-Fi/LAN to run warble, with **Docker Desktop** (macOS/Windows)
-  or **Docker Engine** (Linux) installed and running.
+- A Linux or macOS computer on the same Wi-Fi/LAN to run warble, with Docker
+  installed and running (Docker Engine on Linux, Docker Desktop on macOS).
 - Room for the AI model. A small model like `gemma3:4b` runs on a modest machine;
   bigger models want more RAM/VRAM and ideally a GPU. On macOS, run Ollama natively
   for GPU acceleration (the setup script handles this).
@@ -101,9 +108,9 @@ whisper model + language, the Piper voice. See `.env.example`.
 warble is language-neutral; three settings pick the language:
 
 1. **whisper** model + `WHISPER_LANG` in `.env` (e.g. `de`, `ro`, or `auto`).
-2. **Piper voice** — fetch one for your language (browse
+2. **Piper voice**, fetch one for your language (browse
    [piper voices](https://huggingface.co/rhasspy/piper-voices)) and set `PIPER_VOICE`.
-3. **Prompt** — write `server/config/prompt.txt` in your language.
+3. **Prompt**, write `server/config/prompt.txt` in your language.
 
 ### The emotion tag
 

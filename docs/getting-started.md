@@ -17,7 +17,7 @@ you wait.
 
 Docker is the program that runs warble's pieces for you.
 
-- **macOS / Windows:** download and install [Docker Desktop](https://www.docker.com/products/docker-desktop/),
+- **macOS:** download and install [Docker Desktop](https://www.docker.com/products/docker-desktop/),
   then open it. Wait until its whale icon says it's running.
 - **Linux:** install [Docker Engine](https://docs.docker.com/engine/install/).
 

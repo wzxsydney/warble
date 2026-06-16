@@ -93,11 +93,11 @@ Settings split by reload behavior:
 
 ### Hot-reloadable config
 
-`config/prompt.txt` — plain text system prompt. Edit freely; trailing newlines trimmed. Empty file is rejected and the previous snapshot is kept.
+`config/prompt.txt`, plain text system prompt. Edit freely; trailing newlines trimmed. Empty file is rejected and the previous snapshot is kept.
 
-The prompt instructs the model to lead every reply with a bracketed emotion tag — one of `[neutral|happy|laughing|angry|sad|crying|doubtful]`. The pipeline parses and strips this tag before TTS, then emits an `{"type":"llm","emotion":"..."}` WS frame so the device face updates roughly in sync with audio start. Tag set matches the firmware's `StackChanAvatarDisplay::SetEmotion` (`stackchan_display.cc:329-365`). `sleepy` is excluded because it triggers a "Zzz…" overlay + halts idle motion. See [LOCAL_BACKEND.md](../../LOCAL_BACKEND.md) § Face emotion pipeline for the full flow.
+The prompt instructs the model to lead every reply with a bracketed emotion tag, one of `[neutral|happy|laughing|angry|sad|crying|doubtful]`. The pipeline parses and strips this tag before TTS, then emits an `{"type":"llm","emotion":"..."}` WS frame so the device face updates roughly in sync with audio start. The tag set matches the firmware's `StackChanAvatarDisplay::SetEmotion`. `sleepy` is excluded because it triggers a "Zzz…" overlay and halts idle motion.
 
-`config/runtime.json` — model + voice + sampling:
+`config/runtime.json`, model + voice + sampling:
 
 ```json
 {
@@ -113,7 +113,7 @@ A background poller stats both files every ~1 s. On mtime advance, the file is r
 
 When the prompt or model changes the loader fires a background `Warmup` so the next turn doesn't pay the prefix-cache miss (~500 ms in practice with the model already loaded). Voice and sampling changes apply on the next turn without rewarm.
 
-Validation errors (missing file, bad JSON, empty prompt, missing `piper_voice` / `ollama_model`) log a warning and keep the previous snapshot — they don't crash a running session.
+Validation errors (missing file, bad JSON, empty prompt, missing `piper_voice` / `ollama_model`) log a warning and keep the previous snapshot, they don't crash a running session.
 
 Watch the reload events in `server.log`:
 
@@ -137,7 +137,7 @@ curl -X POST http://127.0.0.1:8003/debug/say \
 
 If exactly one session is live, `device_id` can be omitted. Otherwise pass `{"device_id":"aa:bb:cc:dd:ee:ff","text":"..."}`.
 
-The CLI wrapper is `warble say "..."` / `warble sessions`. Implementation in `internal/debug/`. The injected turn rides the same `audioEvents` channel as real audio, so it serializes with any real turn through the per-session `turnLoop` goroutine — no concurrency surprises.
+The CLI wrapper is `warble say "..."` / `warble sessions`. Implementation in `internal/debug/`. The injected turn rides the same `audioEvents` channel as real audio, so it serializes with any real turn through the per-session `turnLoop` goroutine, no concurrency surprises.
 
 ## Behavior and scope
 
