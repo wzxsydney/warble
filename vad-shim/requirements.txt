@@ -1,4 +1,10 @@
 # Silero VAD WebSocket sidecar dependencies. All MIT/permissive.
+# silero-vad pulls in torch, but we run the model via onnxruntime (onnx=True), so
+# torch only needs to satisfy the dependency. Install the CPU-only build to avoid a
+# multi-GB CUDA download. Bare-metal:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+# (The Docker image already does this; see the Dockerfile.)
 fastapi
 uvicorn[standard]
 silero-vad
