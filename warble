@@ -134,6 +134,8 @@ install_docker() {
 }
 
 cmd_start() {
+    local force_build=0
+    [ "${1:-}" = "--build" ] && force_build=1
     say "Checking prerequisites"
     if ! detect_compose; then install_docker; die "Docker (with Compose) is required. Re-run ./warble start once it's installed."; fi
     require_docker
@@ -186,8 +188,17 @@ cmd_start() {
     say "Fetching speech models (whisper + a Piper voice; large on first run only)"
     bash scripts/fetch-models.sh
 
-    say "Building and starting containers (first build compiles whisper.cpp; give it a few minutes)"
-    if $COMPOSE $PROFILE up -d --build --wait --wait-timeout 300; then
+    # Prefer prebuilt images (fast). Build locally only if --build was passed or
+    # the images can't be pulled (private/unauthenticated, offline, or not published).
+    local build_flag=""
+    if [ "$force_build" = "1" ] || ! $COMPOSE $PROFILE pull --quiet 2>/dev/null; then
+        [ "$force_build" = "1" ] || warn "prebuilt images unavailable; building locally (slower, first time only)"
+        say "Building and starting containers (first build compiles whisper.cpp; a few minutes)"
+        build_flag="--build"
+    else
+        say "Starting from prebuilt images"
+    fi
+    if $COMPOSE $PROFILE up -d $build_flag --wait --wait-timeout 300; then
         ok "all services reported healthy"
     else
         warn "some services did not become healthy in time:"; $COMPOSE ps
@@ -348,7 +359,8 @@ warble: run the local AI voice backend for your StackChan robot.
 
 usage: ./warble <command>
 
-  start        set up (first run) and start everything; safe to re-run
+  start        set up and start everything (pulls prebuilt images; safe to re-run)
+               start --build forces a local image build instead of pulling
   stop         stop everything
   status       plain-language health check
   logs [svc]   follow logs live (Ctrl+C to stop), e.g. ./warble logs server

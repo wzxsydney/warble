@@ -33,8 +33,12 @@ Consequences:
 - Do **not** vendor Piper's source or binary into a warble artifact you then
   redistribute (for example, do not publish a prebuilt Docker image that bundles
   `piper-tts`) without complying with GPL-3.0 for that image.
-- The provided `docker-compose.yml` therefore **builds the Piper image locally**
-  (it installs `piper-tts` from upstream at build time on your machine) rather
-  than shipping a prebuilt image. Building and running it for yourself is fine;
-  GPL obligations attach only to redistribution.
+- The published `ghcr.io/rebelthor/warble-piper` image bundles unmodified
+  `piper-tts`. It is distributed under GPL-3.0: the image carries the label
+  `org.opencontainers.image.licenses=GPL-3.0-or-later`, and the corresponding
+  source is this repo's `piper-shim/Dockerfile` plus upstream
+  [`OHF-Voice/piper1-gpl`](https://github.com/OHF-Voice/piper1-gpl). The other
+  three images (`warble-server`, `warble-whisper`, `warble-vad`) are MIT.
+- `./warble start` can also build the Piper image locally (`./warble start --build`);
+  building and running it for yourself carries no redistribution obligation.
 - The Piper voice models are MIT and may be referenced/downloaded freely.

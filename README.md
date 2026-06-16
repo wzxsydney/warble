@@ -115,6 +115,10 @@ the exact wording). If the model omits it, the server uses `neutral`.
 
 ## Advanced
 
+- **Prebuilt images.** `./warble start` pulls prebuilt images from
+  `ghcr.io/rebelthor/warble-*` (fast) and falls back to building locally if they
+  can't be pulled. Force a local build with `./warble start --build`. Pin a version
+  with `WARBLE_VERSION` in `.env`. Publishing images: see [`docs/releasing.md`](docs/releasing.md).
 - **Manual Docker control** and the macOS/Linux Ollama details: see the comments
   in `docker-compose.yml` and `.env.example`.
 - **Run without Docker** (install whisper.cpp / Piper / Ollama yourself and use the

@@ -1,0 +1,75 @@
+name: Publish images
+
+# Builds the four warble images (multi-arch) and pushes them to GHCR.
+#   - Push a tag like v1.2.0 to cut a release (images tagged 1.2.0, 1.2, 1, latest, sha-...).
+#   - Or run manually (workflow_dispatch) to publish edge images from a branch.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: server
+            context: server
+            dockerfile: server/Dockerfile
+            licenses: MIT
+          - name: whisper
+            context: docker
+            dockerfile: docker/whisper.Dockerfile
+            licenses: MIT
+          - name: vad
+            context: vad-shim
+            dockerfile: vad-shim/Dockerfile
+            licenses: MIT
+          - name: piper
+            context: piper-shim
+            dockerfile: piper-shim/Dockerfile
+            # Piper (piper-tts) is GPL-3.0; this image bundles it. Corresponding
+            # source: this repo's Dockerfile + upstream github.com/OHF-Voice/piper1-gpl.
+            licenses: GPL-3.0-or-later
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/warble-${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=branch
+            type=sha,format=short
+          flavor: latest=auto
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.opencontainers.image.licenses=${{ matrix.licenses }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

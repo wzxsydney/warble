@@ -21,6 +21,7 @@
 
 services:
   whisper:
+    image: ghcr.io/rebelthor/warble-whisper:${WARBLE_VERSION:-latest}
     build:
       context: ./docker
       dockerfile: whisper.Dockerfile
@@ -39,6 +40,7 @@ services:
     restart: unless-stopped
 
   piper:
+    image: ghcr.io/rebelthor/warble-piper:${WARBLE_VERSION:-latest}
     build:
       context: ./piper-shim
     environment:
@@ -55,6 +57,7 @@ services:
     restart: unless-stopped
 
   vad:
+    image: ghcr.io/rebelthor/warble-vad:${WARBLE_VERSION:-latest}
     build:
       context: ./vad-shim
     healthcheck:
@@ -87,6 +90,7 @@ services:
     #           capabilities: [gpu]
 
   server:
+    image: ghcr.io/rebelthor/warble-server:${WARBLE_VERSION:-latest}
     build:
       context: ./server
     depends_on:
