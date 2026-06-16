@@ -13,9 +13,15 @@ WORKDIR /src
 # BUILD_SHARED_LIBS=OFF so whisper-server is self-contained (no libwhisper.so/
 # libggml.so to copy). GGML_OPENMP=OFF avoids a libomp/libgomp runtime dependency;
 # whisper.cpp still multithreads via its own thread pool.
+# GGML_NATIVE=OFF is REQUIRED for a distributed binary: with it ON (the default),
+# ggml compiles for the BUILD machine's exact CPU (-mcpu=native). The arm64 image
+# is cross-built under QEMU in CI, so "native" bakes in instructions that crash
+# (SIGILL) on other arm64 hardware, e.g. Docker Desktop's VM on Apple Silicon.
+# OFF builds a portable baseline that runs everywhere; ggml still picks up common
+# SIMD at runtime.
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-        -DBUILD_SHARED_LIBS=OFF -DGGML_OPENMP=OFF \
+        -DBUILD_SHARED_LIBS=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF \
     && cmake --build build -j --config Release --target whisper-server
 
 FROM debian:bookworm-slim
