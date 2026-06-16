@@ -31,6 +31,9 @@ WHISPER_LANG="${WHISPER_LANG:-auto}"
 WHISPER_EXTRA_ARGS="${WHISPER_EXTRA_ARGS:--bs 5 -bo 5}"
 PIPER_UVICORN="${PIPER_UVICORN:-envs/piper/bin/uvicorn}"
 VAD_UVICORN="${VAD_UVICORN:-envs/vad/bin/uvicorn}"
+# Exported so the piper shim (a child process) inherits it as its default voice.
+PIPER_DEFAULT_VOICE="${PIPER_DEFAULT_VOICE:-en_US-lessac-medium}"
+export PIPER_DEFAULT_VOICE
 OLLAMA_MODE="${OLLAMA_MODE:-external}"
 OLLAMA_LOG="${OLLAMA_LOG:-$LOG_DIR/ollama.log}"
 # Resolve a possibly-relative whisper model path against the warble root.

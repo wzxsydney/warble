@@ -15,7 +15,16 @@
 
 set -u
 
-PORT="${STACKCHAN_PORT:-/dev/cu.usbmodem1101}"
+# Auto-detect the device serial port (override with STACKCHAN_PORT).
+# macOS enumerates the CoreS3 as /dev/cu.usbmodem*; Linux as /dev/ttyACM* (or ttyUSB*).
+default_port() {
+    if [ "$(uname -s)" = "Darwin" ]; then
+        ls /dev/cu.usbmodem* 2>/dev/null | head -1
+    else
+        ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -1
+    fi
+}
+PORT="${STACKCHAN_PORT:-$(default_port)}"
 LOG_FILE="${STACKCHAN_LOG:-/tmp/stackchan.log}"
 PID_FILE="/tmp/stackchan-serial.pid"
 
