@@ -32,6 +32,10 @@ The server runs the whole turn locally: whisper.cpp transcribes what you say,
 Silero VAD detects when you stop, Ollama generates the reply, and Piper speaks it.
 The server also sets the robot's face from an emotion tag in each reply.
 
+![A live conversation viewed with the warble transcript command: each line shows what the robot heard and replied, tagged with a mood that drives its face](docs/transcript.png)
+
+*A real conversation captured with `./warble transcript`. What it heard, the reply, and the mood driving the robot's face all ran on a local machine. No cloud, no account.*
+
 > **New here?** Follow the step-by-step [Getting Started guide](docs/getting-started.md).
 > It walks through everything below in plain language.
 
