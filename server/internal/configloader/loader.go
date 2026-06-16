@@ -12,7 +12,7 @@
 // current values without locks.
 //
 // Cold-start settings (ports, sidecar URLs, audio frame geometry) stay
-// in internal/config and require a process restart — see CLAUDE.md.
+// in internal/config and require a process restart (see server/README.md).
 package configloader
 
 import (

@@ -92,8 +92,10 @@ $WHISPER_EXTRA_ARGS"
             echo "$(resolve_bin "$VAD_UVICORN") vad_shim:app --host $BIND_HOST --port $VAD_PORT --log-level warning"
             ;;
         server)
-            # Build before run so the binary is current.
-            echo "/bin/sh -c 'cd $ROOT/server && go build -o $RUN_DIR/server ./cmd/server && exec $RUN_DIR/server'"
+            # Build before run so the binary is current. Seed the hot-reloadable
+            # config from the examples on first run (the server refuses to start
+            # without prompt.txt + runtime.json, which are gitignored).
+            echo "/bin/sh -c 'cd $ROOT/server && { [ -f config/prompt.txt ] || cp config/prompt.example.txt config/prompt.txt; } && { [ -f config/runtime.json ] || cp config/runtime.example.json config/runtime.json; } && go build -o $RUN_DIR/server ./cmd/server && exec $RUN_DIR/server'"
             ;;
     esac
 }

@@ -137,8 +137,10 @@ the exact wording). If the model omits it, the server uses `neutral`.
 warble's own code is MIT. It orchestrates external programs you install; see
 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md). One boundary matters:
 **Piper (`piper-tts`) is GPL-3.0**. warble talks to it over HTTP, so warble stays
-MIT, but do not redistribute a built artifact that bundles Piper without meeting
-GPL-3.0. The provided Piper image is built locally for that reason.
+MIT. The prebuilt `warble-piper` image bundles Piper, so that image is distributed
+under GPL-3.0 (labeled accordingly; its corresponding source is
+`piper-shim/Dockerfile` plus upstream `piper1-gpl`). The other three images
+(`warble-server`, `warble-whisper`, `warble-vad`) are MIT.
 
 Protocol implemented from the [`xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32)
 docs ([WebSocket](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md)).

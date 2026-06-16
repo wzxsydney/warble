@@ -70,8 +70,9 @@ You can also run it on its own any time:
 ```
 
 This needs a small tool called `esptool` on your computer. If `./warble connect`
-says it's missing, install it with `pipx install esptool` (or `pip install esptool`)
-and run it again.
+says it's missing, install it with `pipx install esptool` (or `pip install esptool`;
+on Linux you can also use your package manager, e.g. `sudo apt install esptool` /
+`sudo dnf install esptool`) and run it again.
 
 ## Step 6: Talk to it
 

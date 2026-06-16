@@ -39,7 +39,7 @@ func Default() Config {
 		AudioSampleHz:  24000,
 		AudioFrameMS:   60,
 		WSURLOverride:  envOr("WARBLE_WS_URL", ""),
-		TimezoneOffset: 180, // EEST, matches CLAUDE.md test device locale
+		TimezoneOffset: 0, // minutes east of UTC; set for your locale (e.g. 60 = UTC+1)
 
 		WhisperURL: envOr("WARBLE_WHISPER_URL", "http://127.0.0.1:8082/inference"),
 		OllamaURL:  envOr("WARBLE_OLLAMA_URL", "http://127.0.0.1:11434"),

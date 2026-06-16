@@ -1,7 +1,8 @@
 # Third-party components
 
 warble's own code is MIT (see `LICENSE`). It orchestrates several external
-programs and models that you install yourself; warble does not redistribute
+programs and models that you install yourself; with one exception (the prebuilt
+`warble-piper` image, see the boundary note below) warble does not redistribute
 their code or binaries. Their licenses are theirs. This file credits them and
 flags the one license boundary that matters for redistribution.
 
@@ -34,10 +35,11 @@ Consequences:
   redistribute (for example, do not publish a prebuilt Docker image that bundles
   `piper-tts`) without complying with GPL-3.0 for that image.
 - The published `ghcr.io/rebelthor/warble-piper` image bundles unmodified
-  `piper-tts`. It is distributed under GPL-3.0: the image carries the label
+  `piper-tts` (the version pinned in `piper-shim/requirements.txt`, currently
+  `1.4.2`). It is distributed under GPL-3.0: the image carries the label
   `org.opencontainers.image.licenses=GPL-3.0-or-later`, and the corresponding
-  source is this repo's `piper-shim/Dockerfile` plus upstream
-  [`OHF-Voice/piper1-gpl`](https://github.com/OHF-Voice/piper1-gpl). The other
+  source is this repo's `piper-shim/Dockerfile` plus the matching upstream release
+  of [`OHF-Voice/piper1-gpl`](https://github.com/OHF-Voice/piper1-gpl). The other
   three images (`warble-server`, `warble-whisper`, `warble-vad`) are MIT.
 - `./warble start` can also build the Piper image locally (`./warble start --build`);
   building and running it for yourself carries no redistribution obligation.

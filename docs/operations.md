@@ -17,7 +17,28 @@ bin/warble say "text..."       # inject a turn, hands-free testing (needs WARBLE
 bin/warble babysit server      # poll every 10s, restart if dead
 ```
 
+## Prerequisites
+
+The bare-metal path builds the Go server locally and uses a few common CLI tools.
+Install, per OS:
+
+- **Build deps for the server** (CGO links libopus via `gopkg.in/hraban/opus.v2`):
+  - macOS: `brew install go opus opusfile pkg-config`
+  - Debian/Ubuntu: `sudo apt install golang libopus-dev libopusfile-dev pkg-config`
+  - Fedora: `sudo dnf install golang opus-devel opusfile-devel pkgconf`
+- **Runtime tools** used by `bin/warble` / `bin/serial`: `curl`, `lsof`, `nc`
+  (netcat), and `jq` (for `transcript`). Most desktops have these; minimal Linux
+  servers may not.
+
 ## Setup (Python sidecars)
+
+Seed the hot-reloadable config from the examples (the server refuses to start
+without these; `bin/warble start server` also does this automatically):
+
+```bash
+cp server/config/prompt.example.txt   server/config/prompt.txt
+cp server/config/runtime.example.json server/config/runtime.json
+```
 
 Create the two venvs from the pinned requirements, then fetch models:
 

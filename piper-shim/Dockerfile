@@ -1,7 +1,8 @@
 # Piper TTS shim. piper-tts (OHF-Voice/piper1-gpl) is GPL-3.0 and is installed
-# from upstream here at build time. This image therefore contains GPL software:
-# build and run it for yourself freely, but do not redistribute the built image
-# without satisfying GPL-3.0. See ../THIRD_PARTY_LICENSES.md.
+# from upstream at build time (pinned in requirements.txt), so this image contains
+# GPL software. The published warble-piper image is distributed under GPL-3.0:
+# labeled org.opencontainers.image.licenses=GPL-3.0-or-later, with corresponding
+# source being this Dockerfile + upstream piper1-gpl. See ../THIRD_PARTY_LICENSES.md.
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
         espeak-ng curl && rm -rf /var/lib/apt/lists/*

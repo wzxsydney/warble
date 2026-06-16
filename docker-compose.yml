@@ -3,14 +3,18 @@
 # Easiest: run ./warble start  (handles models, build, startup, model pull, and
 # the macOS/Linux Ollama difference). Check status with ./warble status.
 #
-# Manual equivalents, if you prefer raw compose:
+# Manual equivalents, if you prefer raw compose. First-run prep the ./warble
+# wrapper does for you:
+#   cp .env.example .env   # then set WARBLE_WS_URL=ws://<this-host-LAN-IP>:8000/xiaozhi/v1/
+#   cp server/config/prompt.example.txt   server/config/prompt.txt    # server won't start without these
+#   cp server/config/runtime.example.json server/config/runtime.json
+#   scripts/fetch-models.sh                                           # writes into ./models
+# Then:
 #   docker compose up -d --build --wait                    # server + whisper + piper + vad
 #   docker compose --profile ollama up -d --build --wait   # also run Ollama in a container
 #
 # Then point the device at this host:
 #   nvs-tool/switch_backend.sh http://<this-host-LAN-IP>:8003/xiaozhi/ota/
-#
-# Fetch models first:  scripts/fetch-models.sh   (writes into ./models)
 #
 # Ollama notes:
 #   - Linux with an NVIDIA GPU: use the `ollama` profile and uncomment the GPU

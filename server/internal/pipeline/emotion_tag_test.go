@@ -29,30 +29,30 @@ func TestEmotionTagParser(t *testing.T) {
 	}{
 		{
 			name:            "tag in single token",
-			tokens:          []string{"[happy] Salut!"},
+			tokens:          []string{"[happy] Hello!"},
 			wantEmotion:     "happy",
 			wantFired:       true,
-			wantPassthrough: "Salut!",
+			wantPassthrough: "Hello!",
 		},
 		{
 			name:            "tag split across tokens",
-			tokens:          []string{"[", "happy", "]", " Salut!"},
+			tokens:          []string{"[", "happy", "]", " Hello!"},
 			wantEmotion:     "happy",
 			wantFired:       true,
-			wantPassthrough: "Salut!",
+			wantPassthrough: "Hello!",
 		},
 		{
 			name:            "tag with leading whitespace tokens",
-			tokens:          []string{" ", "\n", "[sad", "] vai"},
+			tokens:          []string{" ", "\n", "[sad", "] oh no"},
 			wantEmotion:     "sad",
 			wantFired:       true,
-			wantPassthrough: "vai",
+			wantPassthrough: "oh no",
 		},
 		{
 			name:            "no tag, plain text",
-			tokens:          []string{"Salut! ", "Cum ești?"},
+			tokens:          []string{"Hello! ", "How are you?"},
 			wantFired:       false,
-			wantPassthrough: "Salut! Cum ești?",
+			wantPassthrough: "Hello! How are you?",
 		},
 		{
 			name:            "unknown tag passed through verbatim",

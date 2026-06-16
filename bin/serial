@@ -28,6 +28,9 @@ PORT="${STACKCHAN_PORT:-$(default_port)}"
 LOG_FILE="${STACKCHAN_LOG:-/tmp/stackchan.log}"
 PID_FILE="/tmp/stackchan-serial.pid"
 
+# The stty "set device" flag differs: BSD/macOS uses -f, GNU/Linux uses -F.
+if [ "$(uname -s)" = "Darwin" ]; then STTY_F="-f"; else STTY_F="-F"; fi
+
 usage() {
     sed -n '2,16p' "$0"
     exit 2
@@ -53,7 +56,7 @@ free_port() {
 cmd_tail() {
     check_port || exit 1
     free_port
-    stty -f "$PORT" 115200 cs8 -cstopb -parenb -ixon raw 2>/dev/null
+    stty $STTY_F "$PORT" 115200 cs8 -cstopb -parenb -ixon raw 2>/dev/null
     echo "tailing $PORT (Ctrl+C to stop)" >&2
     exec cat "$PORT"
 }
@@ -65,7 +68,7 @@ cmd_bg() {
         return 0
     fi
     free_port
-    stty -f "$PORT" 115200 cs8 -cstopb -parenb -ixon raw 2>/dev/null
+    stty $STTY_F "$PORT" 115200 cs8 -cstopb -parenb -ixon raw 2>/dev/null
     nohup cat "$PORT" >>"$LOG_FILE" 2>&1 </dev/null &
     echo $! >"$PID_FILE"
     echo "started (pid $(cat "$PID_FILE")); writing to $LOG_FILE" >&2

@@ -42,8 +42,8 @@ func (s *SentenceSplitter) extract(flushing bool) []string {
 	// Split early so TTS can start synthesizing the first chunk while the
 	// LLM is still emitting the rest. xinnan-tech does the same.
 	const (
-		minFirstChunkLen = 4 // accept very short opening pieces (e.g. "Hi!" / "Salut!")
-		minCommaChunkLen = 8 // xinnan-tech splits on the first comma even for "Sunt StackChan," (14 chars)
+		minFirstChunkLen = 4 // accept very short opening pieces (e.g. "Hi!")
+		minCommaChunkLen = 8 // xinnan-tech splits on the first comma even for "I am StackChan," (15 chars)
 	)
 
 	text := s.buf.String()
