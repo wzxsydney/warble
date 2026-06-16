@@ -7,7 +7,7 @@ COPY requirements.txt .
 # Install CPU-only torch first. silero-vad declares torch as a dependency, but we
 # run the model via onnxruntime (onnx=True), so the default multi-GB CUDA wheel is
 # pure bloat. The CPU wheel (~200 MB) satisfies the dependency.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+RUN pip install --no-cache-dir torch==2.12.0 --index-url https://download.pytorch.org/whl/cpu \
  && pip install --no-cache-dir -r requirements.txt
 COPY vad_shim.py .
 EXPOSE 8005

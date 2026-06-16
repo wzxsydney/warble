@@ -446,7 +446,7 @@ cmd_transcript() {
     # Everything else (vad, ws lifecycle, llm.first_sentence partials,
     # turn.end, debug noise) is suppressed. We key on llm.done rather
     # than turn.end so the BOT line appears the moment the LLM finishes
-    # generating — roughly when the first audio frame goes out — instead
+    # generating, roughly when the first audio frame goes out, instead
     # of waiting on TTS synth + opus pacing tail (~3 s later).
     #
     # The mood chip is parsed out of the leading "[name]" tag the LLM is
@@ -502,7 +502,7 @@ cmd_transcript() {
               elif .msg == "inject.text" then
                 "U\($us)\($ts)\($us)\($us)[inject] \(.text // "")"
               elif .msg == "llm.done" then
-                # Fires the moment the LLM stream completes — ~3 s before the
+                # Fires the moment the LLM stream completes, ~3 s before the
                 # device finishes speaking (TTS synth + opus pacing tail).
                 (.reply // "") as $r
                 | (($r | capture("^\\s*\\[(?<emo>[a-zA-Z]+)\\]\\s*(?<rest>.*)"; "s")) // {emo: "", rest: $r}) as $m
@@ -525,7 +525,7 @@ cmd_transcript() {
 
 cmd_sessions() {
     # Lists active WS sessions. Needs the server to have been started with
-    # WARBLE_DEBUG=1 — otherwise the route is not registered and curl gets 404.
+    # WARBLE_DEBUG=1, otherwise the route is not registered and curl gets 404.
     local host port
     host="$(svc_host server)"; port="$(svc_port server)"
     # OTA endpoints share the second listener (default :8003, see OTA_PORT).

@@ -5,8 +5,8 @@
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
 #   pip install -r requirements.txt
 # (The Docker image already does this; see the Dockerfile.)
-fastapi
-uvicorn[standard]
-silero-vad
-onnxruntime
-numpy
+fastapi==0.137.1
+uvicorn[standard]==0.49.0
+silero-vad==6.2.1
+onnxruntime==1.27.0
+numpy==2.4.6

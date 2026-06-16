@@ -1,4 +1,4 @@
-# xiaozhi Wire Protocol — extracted spec
+# xiaozhi Wire Protocol, extracted spec
 
 Canonical spec for what the vendored `xiaozhi-esp32` firmware client requires from the server. Every firmware claim cites a line in upstream `78/xiaozhi-esp32@v2.2.4`. This is what the `server` implements.
 
@@ -7,7 +7,7 @@ Path convention in citations:
 
 ## Transport
 
-WebSocket only. MQTT branch (`fw/protocols/mqtt_protocol.cc`) is not in scope — the firmware picks WebSocket when the OTA response contains a `websocket` block but no `mqtt` block ([fw/ota.cc:146-186](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/ota.cc#L146)).
+WebSocket only. MQTT branch (`fw/protocols/mqtt_protocol.cc`) is not in scope, the firmware picks WebSocket when the OTA response contains a `websocket` block but no `mqtt` block ([fw/ota.cc:146-186](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/ota.cc#L146)).
 
 Two server-side ports:
 
@@ -35,7 +35,7 @@ Serial-Number: <32 chars, only if Activation-Version=2>
 { "version": 2, "language": "en-US", "flash_size": 16777216, ... board JSON ... }
 ```
 
-Headers set at [fw/ota.cc:55-71](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/ota.cc#L55). Body is `board.GetSystemInfoJson()` ([fw/ota.cc:93](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/ota.cc#L93)) — opaque to the server. If body is empty, the firmware uses GET; ignore that path.
+Headers set at [fw/ota.cc:55-71](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/ota.cc#L55). Body is `board.GetSystemInfoJson()` ([fw/ota.cc:93](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/ota.cc#L93)), opaque to the server. If body is empty, the firmware uses GET; ignore that path.
 
 ### Response
 
@@ -71,8 +71,8 @@ Field-by-field semantics, all from [fw/ota.cc:114-241](https://github.com/78/xia
 
 Optional blocks the firmware also reads but we omit:
 
-- `activation.{message, code, challenge, timeout_ms}` — registration flow with Tenclass. Absent block = device already activated.
-- `mqtt.*` — alternate transport. Omitting the block forces WebSocket.
+- `activation.{message, code, challenge, timeout_ms}`, registration flow with Tenclass. Absent block = device already activated.
+- `mqtt.*`, alternate transport. Omitting the block forces WebSocket.
 
 ### GET handler
 
@@ -139,13 +139,13 @@ Server reply parsed in [fw/protocols/websocket_protocol.cc:228-254](https://gith
 
 Values in use: 24 kHz, 60 ms.
 
-For emotion display, don't negotiate MCP back — leave `features` out of the reply. The device only initializes its MCP server when the server acknowledges by routing `mcp` messages back; the server doesn't.
+For emotion display, don't negotiate MCP back, leave `features` out of the reply. The device only initializes its MCP server when the server acknowledges by routing `mcp` messages back; the server doesn't.
 
 ### Client → server messages (after hello)
 
 All carry `session_id` (matching the one we issued) and a `type`.
 
-#### `listen` — state machine driver
+#### `listen`, state machine driver
 
 Three states: `start`, `stop`, `detect`. Sent at [fw/protocols/protocol.cc:51-74](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/protocols/protocol.cc#L51).
 
@@ -164,7 +164,7 @@ Three states: `start`, `stop`, `detect`. Sent at [fw/protocols/protocol.cc:51-74
 
 Triggered on device when entering listening state ([fw/application.cc:889-894](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/application.cc#L889)).
 
-#### `abort` — user interrupted
+#### `abort`, user interrupted
 
 ```json
 { "session_id": "...", "type": "abort" }
@@ -178,7 +178,7 @@ Triggered on device when entering listening state ([fw/application.cc:889-894](h
 3. Send `{"type":"tts","state":"stop","session_id":"..."}`.
 4. Drop server-side speak-state flags.
 
-#### `mcp` — IoT control passthrough
+#### `mcp`, IoT control passthrough
 
 ```json
 { "session_id": "...", "type": "mcp", "payload": { ...arbitrary JSON-RPC... } }
@@ -186,7 +186,7 @@ Triggered on device when entering listening state ([fw/application.cc:889-894](h
 
 [fw/protocols/protocol.cc:76-79](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/protocols/protocol.cc#L76). Only sent if server-side MCP was negotiated. We skip MCP, so we should never see these. If we do, log and drop.
 
-#### Binary frames — opus audio upstream
+#### Binary frames, opus audio upstream
 
 Format depends on the negotiated version (NVS `websocket:version`). Three variants at [fw/protocols/websocket_protocol.cc:33-58](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/protocols/websocket_protocol.cc#L33):
 
@@ -230,7 +230,7 @@ struct BinaryProtocol3 {
 
 All text frames; binary frames are opus only.
 
-#### `tts` — drive device speak state
+#### `tts`, drive device speak state
 
 ```json
 { "type": "tts", "state": "start",          "session_id": "..." }
@@ -259,7 +259,7 @@ Server ordering for one user turn:
 
 Each `sentence_start` frame must precede the audio for that sentence. Device renders the text immediately.
 
-#### `stt` — show user transcript
+#### `stt`, show user transcript
 
 ```json
 { "type": "stt", "text": "what the user said", "session_id": "..." }
@@ -267,7 +267,7 @@ Each `sentence_start` frame must precede the audio for that sentence. Device ren
 
 [fw/application.cc:550-557](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/application.cc#L550). Sent once per user turn, after ASR completes, before `tts:start`.
 
-#### `llm` — emotion tag
+#### `llm`, emotion tag
 
 ```json
 { "type": "llm", "emotion": "neutral|happy|sad|angry|confused|...", "text": "" }
@@ -275,7 +275,7 @@ Each `sentence_start` frame must precede the audio for that sentence. Device ren
 
 [fw/application.cc:558-564](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/application.cc#L558). Sets the face expression. Optional. Phase 2.
 
-#### `alert` — error popup with sound
+#### `alert`, error popup with sound
 
 ```json
 { "type": "alert", "status": "...", "message": "...", "emotion": "..." }
@@ -283,7 +283,7 @@ Each `sentence_start` frame must precede the audio for that sentence. Device ren
 
 [fw/application.cc:583-591](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/application.cc#L583). All three fields required (string), else device logs warning and drops. Plays `Lang::Sounds::OGG_VIBRATION` and shows the message. Useful for surfacing "LLM unreachable" etc.
 
-#### `system` — only `reboot` is honored
+#### `system`, only `reboot` is honored
 
 ```json
 { "type": "system", "command": "reboot" }
@@ -291,7 +291,7 @@ Each `sentence_start` frame must precede the audio for that sentence. Device ren
 
 [fw/application.cc:570-582](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/application.cc#L570). Out of scope; do not send.
 
-#### Binary frames — opus audio downstream
+#### Binary frames, opus audio downstream
 
 Match the version used upstream. For version 1: raw opus, frame_duration 60 ms, sample_rate as advertised in our `hello` reply (24 kHz default).
 
@@ -325,9 +325,9 @@ Server is responsible for sending `tts.stop` after audio drains. The server wait
 | Server → device idle | 120 s | [fw/protocols/protocol.cc:82](https://github.com/78/xiaozhi-esp32/blob/v2.2.4/main/protocols/protocol.cc#L82) | Device closes WS |
 | Server-side no-voice | 120 s | server session timeout | Server says goodbye, closes |
 
-Server's keep-alive: send any frame (e.g. periodic empty `system` is NOT honored — keep an internal heartbeat by repeating last `tts:stop` is overkill). Easiest: as long as a session is active and there's no voice, just let the 120 s timeout happen and let the device reconnect on the next wake.
+Server's keep-alive: send any frame (e.g. periodic empty `system` is NOT honored, keep an internal heartbeat by repeating last `tts:stop` is overkill). Easiest: as long as a session is active and there's no voice, just let the 120 s timeout happen and let the device reconnect on the next wake.
 
-## Audio pacing — what the device tolerates
+## Audio pacing, what the device tolerates
 
 The device's opus decoder feeds a small jitter buffer. Sending all frames as fast as possible **overruns** that buffer (drops); sending slower than wall-clock **underruns** (gaps and glitches). The server's strategy in [internal/pipeline/pacer.go](internal/pipeline/pacer.go):
 
@@ -335,7 +335,7 @@ The device's opus decoder feeds a small jitter buffer. Sending all frames as fas
 2. **Pacing phase**: maintain a virtual `play_position` that advances by `frame_duration` ms per packet. Before sending packet N, compute `elapsed_ms = monotonic_now - start`. If `elapsed_ms < play_position`, sleep the difference. Otherwise send immediately (catching up).
 3. **Drain**: after the last packet, wait for the queue to empty, then sleep `(PRE_BUFFER_COUNT + 2) * frame_duration` ms = 420 ms before sending `tts:stop`.
 
-These numbers come from device-side empirical testing — changing them risks audible artifacts.
+These numbers come from device-side empirical testing, changing them risks audible artifacts.
 
 ## Session lifecycle summary
 
