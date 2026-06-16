@@ -1,0 +1,375 @@
+#!/usr/bin/env bash
+# warble: one command to run the local AI voice backend with Docker.
+#
+#   ./warble start      set up (first run) and start everything; safe to re-run
+#   ./warble stop       stop everything
+#   ./warble status     plain-language health check
+#   ./warble logs [svc] follow logs live (Ctrl+C to stop); e.g. ./warble logs server
+#   ./warble restart    bounce the running services
+#
+# First time:  ./warble start
+#
+# (To run without Docker, use the bare-metal supervisor bin/warble instead;
+#  see docs/operations.md.)
+set -u
+ROOT="$(cd "$(dirname "$0")" && pwd)"; cd "$ROOT"
+OS="$(uname -s)"
+
+if [ -t 1 ]; then B="\033[1m"; G="\033[32m"; Y="\033[33m"; R="\033[31m"; X="\033[0m"; else B=""; G=""; Y=""; R=""; X=""; fi
+say()  { printf "${B}==>${X} %s\n" "$*"; }
+ok()   { printf "  ${G}ok${X} %s\n" "$*"; }
+warn() { printf "  ${Y}!${X}  %s\n" "$*"; }
+die()  { printf "${R}error:${X} %s\n" "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+ask()  { printf "${B}%s${X} [y/N] " "$1"; read -r _a </dev/tty 2>/dev/null || _a=n; case "$_a" in y|Y|yes|YES) return 0;; *) return 1;; esac; }
+
+COMPOSE=""
+detect_compose() {
+    if have docker && docker compose version >/dev/null 2>&1; then COMPOSE="docker compose"; return 0
+    elif have docker-compose; then COMPOSE="docker-compose"; return 0
+    else return 1; fi
+}
+
+# Returns a human-readable problem with Docker, or nothing if it's usable.
+docker_problem() {
+    have docker || { echo "Docker isn't installed. Run ./warble start to set it up."; return; }
+    detect_compose || { echo "Docker Compose isn't available. Install the Docker Compose plugin."; return; }
+    err="$(docker info 2>&1 >/dev/null)"
+    [ -z "$err" ] && return
+    if printf '%s' "$err" | grep -qi "permission denied"; then
+        echo "No access to Docker. Run: newgrp docker  (or log out and back in), then retry."
+    elif [ "$OS" = "Darwin" ]; then
+        echo "Docker isn't running. Open Docker Desktop, then retry."
+    else
+        echo "Docker isn't running. Start it: sudo systemctl start docker"
+    fi
+}
+
+# Exit with friendly guidance if Docker is unusable; otherwise set $COMPOSE.
+# Called directly (not in a subshell) so the COMPOSE assignment persists.
+require_docker() {
+    problem="$(docker_problem)"
+    [ -n "$problem" ] && die "$problem"
+    detect_compose
+}
+
+set_env() {  # set_env KEY VALUE  -> idempotently set KEY=VALUE in .env
+    tmp="$(mktemp)"; grep -v "^$1=" .env > "$tmp" 2>/dev/null || true
+    printf '%s=%s\n' "$1" "$2" >> "$tmp"; mv "$tmp" .env
+}
+
+lan_ip() {
+    if [ "$OS" = "Darwin" ]; then
+        ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null
+    else
+        ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1);exit}}' \
+            || hostname -I 2>/dev/null | awk '{print $1}'
+    fi
+}
+
+# First USB serial port the robot is likely on (macOS cu.usbmodem*, Linux ttyACM*).
+serial_port() {
+    if [ "$OS" = "Darwin" ]; then ls /dev/cu.usbmodem* 2>/dev/null | head -1
+    else ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | head -1; fi
+}
+
+# Reprogram the robot's stored backend URL over USB. $1 = url, $2 = human label.
+# Prints instructions, confirms, then runs the NVS tool. Never aborts the script
+# (returns nonzero so callers like 'start' can continue).
+point_device() {
+    local url="$1" label="$2"
+    say "$label"
+    if ! have esptool && ! have esptool.py; then
+        warn "esptool is needed to reprogram the robot over USB."
+        printf "  Install it:  pipx install esptool   (or: pip install esptool)\n"
+        printf "  Then run:    ./warble connect\n"
+        return 1
+    fi
+    local port; port="$(serial_port)"
+    printf "This reprograms the robot over USB so it talks to:\n  ${B}%s${X}\n" "$url"
+    printf "Before continuing:\n"
+    printf "  1. Connect the robot to this computer with a USB-C DATA cable.\n"
+    printf "  2. Close any serial monitor that's using the robot.\n"
+    printf "  3. The robot resets during the process (this is normal).\n"
+    if [ -z "$port" ]; then
+        warn "no robot serial port found (looking for /dev/cu.usbmodem* on macOS, /dev/ttyACM* on Linux)."
+        printf "  Plug in the robot, then run: ./warble connect\n"
+        return 1
+    fi
+    printf "  Detected port: ${B}%s${X}\n" "$port"
+    ask "Reprogram the robot now?" || { printf "Skipped. Run ./warble connect when ready.\n"; return 1; }
+    nvs-tool/switch_backend.sh "$url" "$port"
+}
+
+cmd_connect() {
+    local ip; ip="$(lan_ip)"
+    [ -n "$ip" ] || die "couldn't detect this computer's LAN IP."
+    point_device "http://$ip:8003/xiaozhi/ota/" "Point the robot at this computer (local AI)"
+}
+
+cmd_disconnect() {
+    point_device "https://api.tenclass.net/xiaozhi/ota/" "Point the robot back at the M5Stack cloud"
+}
+
+# Offer to install Docker for the user's platform. Never silent.
+install_docker() {
+    if [ "$OS" = "Darwin" ]; then
+        printf "Docker Desktop is required on macOS.\n"
+        if have brew && ask "Install it now with Homebrew (brew install --cask docker)?"; then brew install --cask docker; fi
+        printf "  Or download: https://www.docker.com/products/docker-desktop/\n"
+        printf "After installing, OPEN Docker Desktop, then run ./warble start\n"
+        return 1
+    fi
+    printf "Docker isn't installed. The official installer handles your distro:\n"
+    printf "  curl -fsSL https://get.docker.com | sudo sh\n"
+    if ask "Install Docker now (uses sudo, will ask for your password)?"; then
+        curl -fsSL https://get.docker.com -o /tmp/get-docker.sh && sudo sh /tmp/get-docker.sh || {
+            warn "automatic install failed; run the command above by hand"; return 1; }
+        sudo systemctl enable --now docker || true
+        sudo usermod -aG docker "$USER" || true
+        printf "Added you to the 'docker' group. Log out and back in (or run 'newgrp docker'),\n"
+        printf "then run ./warble start\n"
+    fi
+    return 1
+}
+
+cmd_start() {
+    say "Checking prerequisites"
+    if ! detect_compose; then install_docker; die "Docker (with Compose) is required. Re-run ./warble start once it's installed."; fi
+    require_docker
+    ok "Docker found ($COMPOSE)"
+
+    say "Preparing configuration"
+    copy_if_missing() { [ -f "$2" ] && ok "$2 exists" || { cp "$1" "$2"; ok "created $2"; }; }
+    copy_if_missing .env.example .env
+    copy_if_missing server/config/prompt.example.txt   server/config/prompt.txt
+    copy_if_missing server/config/runtime.example.json server/config/runtime.json
+
+    if have python3; then
+        MODEL="$(python3 -c 'import json;print(json.load(open("server/config/runtime.json"))["ollama_model"])' 2>/dev/null || echo gemma3:4b)"
+    else
+        MODEL="$(grep -oE '"ollama_model"[^,]*' server/config/runtime.json | grep -oE '"[^"]*"$' | tr -d '"' || echo gemma3:4b)"
+    fi
+    ok "LLM model: $MODEL"
+
+    IP="$(lan_ip)"
+    if [ -n "$IP" ]; then
+        set_env WARBLE_WS_URL "ws://$IP:8000/xiaozhi/v1/"
+        ok "LAN IP $IP -> device will connect to ws://$IP:8000"
+    else
+        IP="<this-machine-LAN-IP>"
+        warn "couldn't detect LAN IP; set WARBLE_WS_URL=ws://<LAN-IP>:8000/xiaozhi/v1/ in .env"
+    fi
+
+    # macOS: Docker can't use the Apple GPU, so Ollama runs natively. Linux: bundled container.
+    PROFILE=""
+    if [ "$OS" = "Darwin" ]; then
+        say "Ollama (macOS: native, GPU-accelerated)"
+        case ":$PATH:" in *:/opt/homebrew/bin:*) ;; *) PATH="/opt/homebrew/bin:$PATH" ;; esac
+        case ":$PATH:" in *:/usr/local/bin:*) ;; *) PATH="/usr/local/bin:$PATH" ;; esac
+        have ollama || die "Ollama is required on macOS. Install: brew install ollama  (or https://ollama.com/download), then re-run."
+        if ! curl -sf -o /dev/null http://127.0.0.1:11434/api/tags; then
+            warn "starting 'ollama serve' in the background"
+            nohup ollama serve >/tmp/warble-ollama.log 2>&1 &
+            for _ in $(seq 1 20); do curl -sf -o /dev/null http://127.0.0.1:11434/api/tags && break; sleep 0.5; done
+        fi
+        curl -sf -o /dev/null http://127.0.0.1:11434/api/tags || die "Ollama didn't come up; see /tmp/warble-ollama.log"
+        set_env WARBLE_OLLAMA_URL http://host.docker.internal:11434
+        ok "native Ollama reachable"
+    else
+        say "Ollama (Linux: bundled container)"
+        PROFILE="--profile ollama"
+        set_env WARBLE_OLLAMA_URL http://ollama:11434
+        ok "will run Ollama in a container"
+    fi
+
+    say "Fetching speech models (whisper + a Piper voice; large on first run only)"
+    bash scripts/fetch-models.sh
+
+    say "Building and starting containers (first build compiles whisper.cpp; give it a few minutes)"
+    if $COMPOSE $PROFILE up -d --build --wait --wait-timeout 300; then
+        ok "all services reported healthy"
+    else
+        warn "some services did not become healthy in time:"; $COMPOSE ps
+        warn "see logs with:  ./warble logs"
+    fi
+
+    say "Pulling the AI model '$MODEL' (large download on first run)"
+    if [ "$OS" = "Darwin" ]; then
+        ollama pull "$MODEL" || warn "couldn't pull $MODEL; run: ollama pull $MODEL"
+    else
+        for _ in $(seq 1 30); do $COMPOSE exec -T ollama ollama list >/dev/null 2>&1 && break; sleep 1; done
+        $COMPOSE exec -T ollama ollama pull "$MODEL" || warn "couldn't pull $MODEL; run: $COMPOSE exec ollama ollama pull $MODEL"
+    fi
+
+    printf "\n${B}${G}warble is running.${X}\n\n"
+    # Offer to point the robot at this computer now (asks + shows instructions).
+    cmd_connect || true
+    printf "\nWhen the robot is pointed here, open the AI Agent app on it and talk.\n\n"
+    printf "Check it any time:   ./warble status\n"
+    printf "Watch the logs:      ./warble logs server\n"
+    printf "Stop everything:     ./warble stop\n"
+    printf "Point the robot:     ./warble connect    (./warble disconnect to go back to cloud)\n"
+    printf "Change language/voice/personality: edit server/config/prompt.txt and runtime.json (see README).\n"
+}
+
+cmd_stop() {
+    require_docker
+    say "Stopping warble..."
+    # --profile ollama so the bundled Ollama container is included (Linux); on
+    # macOS there's no such container, so this is a harmless no-op for it.
+    $COMPOSE --profile ollama down
+    ok "Stopped. Start again with ./warble start"
+}
+
+cmd_logs() {
+    require_docker
+    if [ "$#" -gt 0 ]; then exec $COMPOSE logs -f "$@"; else exec $COMPOSE logs -f; fi
+}
+
+# Conversation-only view: what the robot heard (USER) and replied (BOT, with a
+# colored mood chip), parsed live from the server's JSON logs. Needs jq.
+# Speakers are distinguished three ways: chip background, label, and body style.
+cmd_transcript() {
+    require_docker
+    have jq || die "transcript needs 'jq'. Install it (macOS: brew install jq; Linux: sudo dnf install jq / sudo apt install jq), then retry."
+
+    local user_chip=$'\e[1;30;102m USER \e[0m'   # black on bright green
+    local bot_chip=$'\e[1;30;105m BOT  \e[0m'    # black on bright magenta
+    local user_text=$'\e[0m'                     # default
+    local bot_text=$'\e[2;3m'                    # dim + italic
+    local reset=$'\e[0m'
+    local ts_color=$'\e[90m'                     # dim grey
+    emotion_chip() {
+        local code label
+        case "$1" in
+            happy|laughing) code='103' ;;  # bright yellow
+            sad|crying)     code='104' ;;  # bright blue
+            angry)          code='101' ;;  # bright red
+            doubtful)       code='106' ;;  # bright cyan
+            neutral)        code='107' ;;  # bright white
+            *)              code='100' ;;  # dark grey = no tag
+        esac
+        label="$1"; [ -z "$label" ] && label='----'
+        printf $'\e[1;30;%sm %-8s \e[0m' "$code" "$label"
+    }
+    printf 'transcript: %s message  %s reply  %s mood  (Ctrl+C to stop)\n' \
+        "$user_chip" "$bot_chip" "$(emotion_chip happy)"
+
+    # jq emits fields separated by ASCII Unit Separator (0x1f) so an empty emotion
+    # column (USER lines) doesn't get collapsed by read's whitespace splitting.
+    local US=$'\x1f'
+    $COMPOSE logs -f --no-log-prefix --tail 0 server 2>/dev/null \
+        | jq --unbuffered -r --arg us "$US" '
+            (.time[11:19] // "--:--:--") as $ts
+            | if   .msg == "asr.ok" then
+                "U\($us)\($ts)\($us)\($us)\(.text // "")"
+              elif .msg == "inject.text" then
+                "U\($us)\($ts)\($us)\($us)[inject] \(.text // "")"
+              elif .msg == "llm.done" then
+                (.reply // "") as $r
+                | (($r | capture("^\\s*\\[(?<emo>[a-zA-Z]+)\\]\\s*(?<rest>.*)"; "s")) // {emo: "", rest: $r}) as $m
+                | "A\($us)\($ts)\($us)\($m.emo | ascii_downcase)\($us)\($m.rest)"
+              else empty end' 2>/dev/null \
+        | while IFS="$US" read -r who ts emo text; do
+            case "$who" in
+                U) printf '%s%s%s  %s  %s%s%s\n' \
+                        "$ts_color" "$ts" "$reset" "$user_chip" "$user_text" "$text" "$reset" ;;
+                A) printf '%s%s%s  %s  %s  %s%s%s\n' \
+                        "$ts_color" "$ts" "$reset" "$bot_chip" "$(emotion_chip "$emo")" "$bot_text" "$text" "$reset" ;;
+            esac
+        done
+}
+
+cmd_restart() {
+    require_docker
+    say "Restarting warble..."
+    $COMPOSE --profile ollama restart
+    ok "Restarted. Check with ./warble status"
+}
+
+cmd_status() {
+    require_docker
+
+    line() {  # line "Label" service
+        st="$($COMPOSE ps "$2" --format '{{.Status}}' 2>/dev/null)"
+        if printf '%s' "$st" | grep -qi "healthy"; then printf "  ${G}running${X}   %s\n" "$1"; return 0
+        elif printf '%s' "$st" | grep -qi "up"; then printf "  ${Y}starting${X}  %s\n" "$1"; return 2
+        else printf "  ${R}stopped${X}   %s\n" "$1"; return 1; fi
+    }
+
+    printf "${B}warble status${X}\n"
+    line "Speech recognition (whisper)" whisper
+    line "Text-to-speech (piper)"       piper
+    line "Voice detection (vad)"        vad
+    line "warble server (the robot connects here)" server; server_rc=$?
+
+    model="$(grep -oE '"ollama_model"[^,]*' server/config/runtime.json 2>/dev/null | grep -oE '"[^"]*"$' | tr -d '"')"
+    oll_up=1; model_present=1
+    if [ "$server_rc" = "0" ]; then
+        tags="$($COMPOSE exec -T server sh -c 'curl -fsS "$WARBLE_OLLAMA_URL/api/tags"' 2>/dev/null)"
+        if [ -n "$tags" ]; then oll_up=0; printf '%s' "$tags" | grep -q "\"$model\"" && model_present=0; fi
+    fi
+    # The bundled Ollama is under a compose profile, so query it with the profile
+    # active (plain 'ps ollama' hides profile services).
+    bundled="$($COMPOSE --profile ollama ps ollama --format '{{.Status}}' 2>/dev/null)"
+    if [ "$oll_up" = "0" ]; then
+        printf "  ${G}running${X}   AI model engine (Ollama)\n"
+        if [ "$model_present" = "0" ]; then printf "  ${G}ready${X}     AI model '%s' is downloaded\n" "$model"
+        else printf "  ${Y}missing${X}   AI model '%s' not downloaded -> ./warble start\n" "$model"; fi
+    elif printf '%s' "$bundled" | grep -qi "up"; then
+        printf "  ${Y}starting${X}  AI model engine (Ollama container)\n"
+    elif [ -n "$bundled" ]; then
+        printf "  ${R}stopped${X}   AI model engine (Ollama container) -> ./warble start\n"
+    else
+        printf "  ${R}stopped${X}   AI model engine (Ollama, runs outside Docker) -> start it: ollama serve\n"
+    fi
+
+    echo
+    if [ "$server_rc" = "0" ] && [ "$oll_up" = "0" ] && [ "$model_present" = "0" ]; then
+        printf "${G}${B}Ready.${X} Open the AI Agent app on the robot and talk to it.\n"
+        ws="$(grep -E '^WARBLE_WS_URL=' .env 2>/dev/null | cut -d= -f2-)"
+        ip="$(printf '%s' "$ws" | sed -E 's#ws://([^:]+):.*#\1#')"
+        [ -n "$ip" ] && printf "If the robot isn't pointed here yet:\n  nvs-tool/switch_backend.sh http://%s:8003/xiaozhi/ota/\n" "$ip"
+    elif [ "$server_rc" = "0" ] && [ "$oll_up" != "0" ]; then
+        printf "${Y}Almost ready.${X} warble is up, but the AI engine (Ollama) isn't reachable.\n"
+        [ -n "$bundled" ] && printf "  Start it: ./warble start\n" || printf "  On macOS, start it: ollama serve\n"
+    elif [ "$server_rc" = "0" ] && [ "$model_present" != "0" ]; then
+        printf "${Y}Almost ready.${X} Download the AI model: ./warble start\n"
+    else
+        printf "${Y}Not ready yet.${X} If parts say 'starting', wait a moment and re-run ./warble status\n"
+        printf "If they say 'stopped', run ./warble start   (logs: ./warble logs)\n"
+    fi
+}
+
+usage() {
+    cat <<EOF
+warble: run the local AI voice backend for your StackChan robot.
+
+usage: ./warble <command>
+
+  start        set up (first run) and start everything; safe to re-run
+  stop         stop everything
+  status       plain-language health check
+  logs [svc]   follow logs live (Ctrl+C to stop), e.g. ./warble logs server
+  transcript   show just the conversation (USER heard / BOT replied), live
+  restart      bounce the running services
+  connect      point the robot at this computer (reprograms it over USB)
+  disconnect   point the robot back at the M5Stack cloud
+
+First time:  ./warble start
+EOF
+}
+
+case "${1:-}" in
+    start|setup) shift; cmd_start "$@" ;;
+    stop)        shift; cmd_stop "$@" ;;
+    status)      shift; cmd_status "$@" ;;
+    logs)        shift; cmd_logs "$@" ;;
+    transcript)  shift; cmd_transcript "$@" ;;
+    restart)     shift; cmd_restart "$@" ;;
+    connect)     shift; cmd_connect "$@" ;;
+    disconnect)  shift; cmd_disconnect "$@" ;;
+    ""|-h|--help|help) usage ;;
+    *) echo "unknown command: $1" >&2; usage >&2; exit 2 ;;
+esac

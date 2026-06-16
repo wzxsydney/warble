@@ -1,0 +1,40 @@
+# Python venvs (machine-specific absolute-path shebangs; rebuild from requirements)
+envs/
+
+# ML models (gigabytes; download separately, see README.md)
+models/
+piper-shim/*.onnx
+
+# Per-machine config: copy from the .example files and edit. The .example files
+# ARE tracked; these live copies are not.
+.env
+warble.env
+server/config/prompt.txt
+server/config/runtime.json
+
+# Runtime state
+run/
+log/
+
+# Built Go binaries
+server/bin/
+
+# LLM benchmark artifacts (written by parallel benchmarking session; not source)
+server/*:*/
+server/hf.co/
+server/jobautomation/
+server/qwen*/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -1,0 +1,691 @@
+#!/usr/bin/env bash
+# warble: StackChan local AI stack manager (bare-metal / dev path).
+# Subcommands: status, start, stop, restart, logs, babysit.
+# Services: whisper, piper, vad, server are run directly. ollama is managed per
+# OLLAMA_MODE (external | serve | brew). `server` is the Go AI server
+# (server/cmd/server); it depends on `vad` for server-side end-of-speech detection.
+#
+# Configuration is read from warble.env (copy warble.env.example). The Docker
+# path (docker-compose.yml) does not use this script.
+
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LOG_DIR="$ROOT/log"
+RUN_DIR="$ROOT/run"
+
+# Load user config (optional). Values not set here fall back to the defaults below.
+[ -f "$ROOT/warble.env" ] && . "$ROOT/warble.env"
+
+# Defaults (cross-platform). Override any of these in warble.env.
+BIND_HOST="${BIND_HOST:-127.0.0.1}"
+WHISPER_PORT="${WHISPER_PORT:-8082}"
+PIPER_PORT="${PIPER_PORT:-8001}"
+VAD_PORT="${VAD_PORT:-8005}"
+SERVER_PORT="${SERVER_PORT:-8000}"
+OTA_PORT="${OTA_PORT:-8003}"
+OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+WHISPER_SERVER_BIN="${WHISPER_SERVER_BIN:-whisper-server}"
+WHISPER_MODEL="${WHISPER_MODEL:-models/whisper/ggml-base.bin}"
+WHISPER_LANG="${WHISPER_LANG:-auto}"
+WHISPER_EXTRA_ARGS="${WHISPER_EXTRA_ARGS:--bs 5 -bo 5}"
+PIPER_UVICORN="${PIPER_UVICORN:-envs/piper/bin/uvicorn}"
+VAD_UVICORN="${VAD_UVICORN:-envs/vad/bin/uvicorn}"
+OLLAMA_MODE="${OLLAMA_MODE:-external}"
+OLLAMA_LOG="${OLLAMA_LOG:-$LOG_DIR/ollama.log}"
+# Resolve a possibly-relative whisper model path against the warble root.
+case "$WHISPER_MODEL" in /*) : ;; *) WHISPER_MODEL="$ROOT/$WHISPER_MODEL" ;; esac
+
+mkdir -p "$LOG_DIR" "$RUN_DIR"
+
+SERVICES="whisper piper vad server ollama"
+ALL_SERVICES="whisper piper vad server ollama"
+
+# Per-service config derived from the variables above.
+svc_port()    { case "$1" in whisper) echo "$WHISPER_PORT" ;; piper) echo "$PIPER_PORT" ;; vad) echo "$VAD_PORT" ;; server) echo "$SERVER_PORT" ;; ollama) echo "$OLLAMA_PORT" ;; esac; }
+svc_host()    { case "$1" in whisper|piper|vad|server|ollama) echo "$BIND_HOST" ;; esac; }
+svc_cwd() {
+    case "$1" in
+        whisper)  echo "$ROOT" ;;
+        piper)    echo "$ROOT/piper-shim" ;;
+        vad)      echo "$ROOT/vad-shim" ;;
+        server)   echo "$ROOT/server" ;;
+    esac
+}
+# Resolve a configured binary/launcher path: absolute as-is; a relative path
+# with a slash is taken relative to the warble root; a bare name is left for
+# PATH lookup.
+resolve_bin() {
+    case "$1" in
+        /*)  echo "$1" ;;
+        */*) echo "$ROOT/$1" ;;
+        *)   echo "$1" ;;
+    esac
+}
+
+svc_cmd() {
+    case "$1" in
+        whisper)
+            # Fallback enabled (no -nf) so the decoder retries at higher temperature
+            # when entropy/logprob thresholds trip. With -nf the model accepts low-
+            # confidence hallucinations of stock phrases from its training data on
+            # unclear or noisy input.
+            #
+            # No --prompt: a "casual conversation" prompt biases the decoder toward
+            # that domain. An empty prompt is more neutral.
+            echo "$(resolve_bin "$WHISPER_SERVER_BIN") \
+-m $WHISPER_MODEL \
+-l $WHISPER_LANG --port $WHISPER_PORT --host $BIND_HOST \
+$WHISPER_EXTRA_ARGS"
+            ;;
+        piper)
+            echo "$(resolve_bin "$PIPER_UVICORN") piper_shim:app --host $BIND_HOST --port $PIPER_PORT"
+            ;;
+        vad)
+            # --log-level warning silences uvicorn's own INFO chatter (access
+            # logs from health probes, "connection open/closed" per WebSocket,
+            # etc.). Our custom "vad-shim" logger is independent and still emits
+            # INFO (model load, speech_end events).
+            echo "$(resolve_bin "$VAD_UVICORN") vad_shim:app --host $BIND_HOST --port $VAD_PORT --log-level warning"
+            ;;
+        server)
+            # Build before run so the binary is current.
+            echo "/bin/sh -c 'cd $ROOT/server && go build -o $RUN_DIR/server ./cmd/server && exec $RUN_DIR/server'"
+            ;;
+    esac
+}
+# HTTP health probe per service. Returns 0 if healthy.
+svc_health() {
+    case "$1" in
+        whisper)  curl -sf -o /dev/null --max-time 2 "http://$BIND_HOST:$WHISPER_PORT/inference" -X OPTIONS ;;
+        piper)    curl -sf -o /dev/null --max-time 2 "http://$BIND_HOST:$PIPER_PORT/docs" ;;
+        vad)      curl -sf -o /dev/null --max-time 2 "http://$BIND_HOST:$VAD_PORT/health" ;;
+        server)  curl -sf -o /dev/null --max-time 2 -X POST "http://$BIND_HOST:$OTA_PORT/xiaozhi/ota/" \
+                       -H 'Device-Id: aa:bb:cc:dd:ee:ff' -H 'Client-Id: backend-script-health' ;;
+        ollama)   curl -sf -o /dev/null --max-time 2 "http://$BIND_HOST:$OLLAMA_PORT/api/tags" ;;
+    esac
+}
+
+pidfile() { echo "$RUN_DIR/$1.pid"; }
+logfile() {
+    # ollama's log location depends on OLLAMA_MODE (see OLLAMA_LOG).
+    if [ "$1" = "ollama" ]; then echo "$OLLAMA_LOG"; else echo "$LOG_DIR/$1.log"; fi
+}
+
+is_running() {
+    # ollama is tracked by its port listener, not a managed pidfile (brew/launchd,
+    # `ollama serve`, or an external/container process may own it).
+    if [ "$1" = "ollama" ]; then
+        [ -n "$(listener_pid ollama)" ]
+        return $?
+    fi
+    local pf="$(pidfile "$1")"
+    [ -f "$pf" ] || return 1
+    local pid; pid="$(cat "$pf" 2>/dev/null)"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+port_listening() {
+    local host="$1" port="$2"
+    nc -z -w 1 "$host" "$port" 2>/dev/null
+}
+
+# Return PID of whoever is listening on the service's port, if any.
+# Used to surface "orphan" processes that bin/backend lost track of
+# (no pidfile, but the port is bound).
+listener_pid() {
+    local port; port="$(svc_port "$1")"
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1
+}
+
+color_ok()   { printf '\033[32m%s\033[0m' "$1"; }
+color_warn() { printf '\033[33m%s\033[0m' "$1"; }
+color_err()  { printf '\033[31m%s\033[0m' "$1"; }
+
+# Per-service identity color. Used consistently in `status` (service column)
+# and `logs` (line prefix). Bright variants chosen to avoid colliding with
+# the red/green/yellow state colors above.
+svc_color() {
+    case "$1" in
+        whisper) echo 96 ;;  # bright cyan
+        piper)   echo 95 ;;  # bright magenta
+        vad)     echo 94 ;;  # bright blue
+        server)  echo 93 ;;  # bright yellow
+        ollama)  echo 92 ;;  # bright green
+        *)       echo 0  ;;
+    esac
+}
+color_svc() {
+    printf '\033[%sm%s\033[0m' "$(svc_color "$1")" "$2"
+}
+
+# Pad a possibly-ANSI-colored string with trailing spaces so its *visible*
+# width equals $2. printf's own %-Ns counts escape bytes, which misaligns
+# colored columns against plain ones (e.g. ollama's "-").
+pad_visible() {
+    local s="$1" width="$2"
+    local visible
+    visible="$(printf '%s' "$s" | sed -E $'s/\x1b\\[[0-9;]*m//g')"
+    local pad=$(( width - ${#visible} ))
+    (( pad < 0 )) && pad=0
+    printf '%s%*s' "$s" "$pad" ''
+}
+
+print_status_line() {
+    local svc="$1"
+    local pid_state port_state health_state
+    local port; port="$(svc_port "$svc")"
+    local host; host="$(svc_host "$svc")"
+
+    if [ "$svc" = "ollama" ]; then
+        # ollama is tracked by its port listener (no managed pidfile). Show the
+        # listener PID if up, "stopped" if not.
+        local opid; opid="$(listener_pid ollama)"
+        if [ -n "$opid" ]; then
+            pid_state="$(color_ok "running")($opid)"
+        else
+            pid_state="$(color_err "stopped")"
+        fi
+    elif is_running "$svc"; then
+        pid_state="$(color_ok "running")($(cat "$(pidfile "$svc")"))"
+    else
+        local opid; opid="$(listener_pid "$svc")"
+        if [ -n "$opid" ]; then
+            pid_state="$(color_warn "orphan")($opid)"
+        else
+            pid_state="$(color_err "stopped")"
+        fi
+    fi
+
+    if port_listening "$host" "$port"; then
+        port_state="$(color_ok ":$port")"
+    else
+        port_state="$(color_err ":$port")"
+    fi
+
+    if svc_health "$svc" >/dev/null 2>&1; then
+        health_state="$(color_ok ok)"
+    else
+        health_state="$(color_warn check)"
+    fi
+
+    printf "  %s %s %s %s\n" "$(pad_visible "$(color_svc "$svc" "$svc")" 9)" "$(pad_visible "$pid_state" 21)" "$(pad_visible "$port_state" 7)" "$health_state"
+}
+
+cmd_status() {
+    local target="${1:-all}"
+    echo "warble services"
+    printf "  %-9s %-21s %-7s %s\n" "service" "process" "port" "health"
+    if [ "$target" = "all" ]; then
+        for s in $SERVICES; do print_status_line "$s"; done
+    else
+        print_status_line "$target"
+    fi
+}
+
+start_one() {
+    local svc="$1"
+    local label; label="$(color_svc "$svc" "$svc")"
+    if [ "$svc" = "ollama" ]; then
+        if is_running ollama; then
+            echo "$label already running (pid $(listener_pid ollama))"
+            return 0
+        fi
+        case "$OLLAMA_MODE" in
+            external)
+                echo "$label not running, and OLLAMA_MODE=external."
+                echo "  start it yourself (e.g. 'ollama serve' or a container bound to :$OLLAMA_PORT)"
+                return 1
+                ;;
+            serve)
+                echo "starting $label (ollama serve)..."
+                ( exec ollama serve >>"$OLLAMA_LOG" 2>&1 </dev/null & echo $! >"$(pidfile ollama)" )
+                ;;
+            brew)
+                echo "starting $label via brew services..."
+                brew services start ollama >/dev/null 2>&1
+                ;;
+            *)
+                echo "  $(color_err "unknown OLLAMA_MODE='$OLLAMA_MODE' (use external|serve|brew)")"
+                return 1
+                ;;
+        esac
+        # launchd / the daemon may take a moment to bind the port.
+        local k=0
+        while [ "$k" -lt 30 ] && ! is_running ollama; do
+            sleep 0.5; k=$((k+1))
+        done
+        if is_running ollama; then
+            echo "  pid $(listener_pid ollama), log $OLLAMA_LOG"
+        else
+            echo "  $(color_err "failed to reach :$OLLAMA_PORT")"
+            return 1
+        fi
+        return 0
+    fi
+    if is_running "$svc"; then
+        echo "$label already running (pid $(cat "$(pidfile "$svc")"))"
+        return 0
+    fi
+    local cwd cmd lf pf
+    cwd="$(svc_cwd "$svc")"
+    cmd="$(svc_cmd "$svc")"
+    lf="$(logfile "$svc")"
+    pf="$(pidfile "$svc")"
+    echo "starting $label..."
+    # Two exec calls collapse the chain so the recorded PID is the service:
+    #   - the wrapper subshell `exec`s into bash (else $! captures the
+    #     subshell wrapping `cd && bash`, one PID off the actual service)
+    #   - bash `exec`s into the service command itself
+    # nohup is omitted because macOS nohup forks; the </dev/null and the &
+    # background are enough for the child to survive the parent shell.
+    ( cd "$cwd" && exec bash -c "exec $cmd" >>"$lf" 2>&1 </dev/null & echo $! >"$pf" )
+    sleep 1
+    if is_running "$svc"; then
+        echo "  pid $(cat "$pf"), log $lf"
+    else
+        echo "  $(color_err "failed"); tail -n 20 $lf"
+        tail -n 20 "$lf" 2>/dev/null | sed 's/^/    /'
+        rm -f "$pf"
+        return 1
+    fi
+}
+
+stop_one() {
+    local svc="$1"
+    local label; label="$(color_svc "$svc" "$svc")"
+    if [ "$svc" = "ollama" ]; then
+        if ! is_running ollama; then
+            echo "$label not running"
+            return 0
+        fi
+        case "$OLLAMA_MODE" in
+            external)
+                echo "$label left running (OLLAMA_MODE=external; warble does not manage it)"
+                return 0
+                ;;
+            serve)
+                echo "stopping $label..."
+                local opid; opid="$(listener_pid ollama)"
+                [ -n "$opid" ] && kill "$opid" 2>/dev/null
+                rm -f "$(pidfile ollama)"
+                ;;
+            brew)
+                echo "stopping $label via brew services..."
+                brew services stop ollama >/dev/null 2>&1
+                ;;
+        esac
+        local k=0
+        while [ "$k" -lt 30 ] && is_running ollama; do
+            sleep 0.5; k=$((k+1))
+        done
+        if is_running ollama; then
+            echo "  $(color_err "stop did not free :$OLLAMA_PORT")"
+            # belt-and-braces
+            local opid; opid="$(listener_pid ollama)"
+            if [ -n "$opid" ]; then
+                echo "  killing leftover ollama (pid $opid)"
+                kill "$opid" 2>/dev/null
+            fi
+        fi
+        return 0
+    fi
+    local pf; pf="$(pidfile "$svc")"
+    local pid=""
+    if is_running "$svc"; then
+        pid="$(cat "$pf")"
+        echo "stopping $label (pid $pid)..."
+        kill "$pid" 2>/dev/null
+        local i=0
+        while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 15 ]; do
+            sleep 0.5
+            i=$((i+1))
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "  SIGTERM ignored, sending SIGKILL"
+            kill -9 "$pid" 2>/dev/null
+        fi
+    else
+        echo "$label not running"
+    fi
+    rm -f "$pf"
+
+    # Belt-and-braces: if anything else is still bound to the service's port
+    # (orphaned child, manually-started instance, etc.), kill it too.
+    local opid; opid="$(listener_pid "$svc")"
+    if [ -n "$opid" ]; then
+        echo "  killing orphan on :$(svc_port "$svc") (pid $opid)"
+        kill "$opid" 2>/dev/null
+        local j=0
+        while kill -0 "$opid" 2>/dev/null && [ "$j" -lt 10 ]; do
+            sleep 0.5
+            j=$((j+1))
+        done
+        kill -0 "$opid" 2>/dev/null && kill -9 "$opid" 2>/dev/null
+    fi
+}
+
+adopt_orphan() {
+    # If a service is listening on its port but we don't have a pidfile,
+    # find the pid via lsof and adopt it.
+    local svc="$1"
+    if is_running "$svc"; then return 0; fi
+    local port; port="$(svc_port "$svc")"
+    local pid; pid="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1)"
+    if [ -n "$pid" ]; then
+        echo "$pid" >"$(pidfile "$svc")"
+        echo "  adopted existing $(color_svc "$svc" "$svc") (pid $pid) listening on :$port"
+    fi
+}
+
+cmd_start() {
+    local target="${1:-all}"
+    if [ "$target" = "all" ]; then
+        for s in $ALL_SERVICES; do adopt_orphan "$s"; done
+        for s in $ALL_SERVICES; do start_one "$s"; done
+    else
+        adopt_orphan "$target"
+        start_one "$target"
+    fi
+}
+
+cmd_stop() {
+    local target="${1:-all}"
+    if [ "$target" = "all" ]; then
+        # Stop the AI-agent backend first, then sidecars.
+        # Order: server first (talks to everything else), then sidecars, ollama
+        # last (it's at the bottom of the dependency tree).
+        for s in server vad piper whisper ollama; do stop_one "$s"; done
+    else
+        stop_one "$target"
+    fi
+}
+
+cmd_restart() {
+    local target="${1:-all}"
+    cmd_stop "$target"
+    sleep 1
+    cmd_start "$target"
+}
+
+cmd_logs() {
+    local svc="${1:-all}"
+    if [ "$svc" != "all" ]; then
+        local lf; lf="$(logfile "$svc")"
+        [ -f "$lf" ] || { echo "no log at $lf" >&2; return 1; }
+        exec tail -F "$lf"
+    fi
+    # Multiplex all service logs with a per-service colored, fixed-width prefix.
+    # Colors come from svc_color so they match the `status` command.
+    # Each tail runs in a subshell whose stdout is line-buffered via `while read`.
+    trap 'kill 0 2>/dev/null; exit 0' INT TERM
+    for s in $SERVICES; do
+        local lf; lf="$(logfile "$s")"
+        local color; color="$(svc_color "$s")"
+        # Create the log if missing so tail -F doesn't error on a non-existent file
+        # when the service has never been started.
+        [ -f "$lf" ] || : >"$lf"
+        (
+            tail -Fn0 "$lf" 2>/dev/null | \
+                while IFS= read -r line; do
+                    printf '\033[%sm%-9s\033[0m %s\n' "$color" "$s" "$line"
+                done
+        ) &
+    done
+    local colored=""
+    for s in $SERVICES; do colored+=" $(color_svc "$s" "$s")"; done
+    echo "tailing:${colored} (Ctrl+C to stop)"
+    wait
+}
+
+cmd_transcript() {
+    # Conversation-only view of server.log. Streams three event types:
+    #   asr.ok      -> "USER" chip + transcript (what the device heard)
+    #   inject.text -> "USER" chip + "[inject] ..." (from /debug/say)
+    #   llm.done    -> "BOT " chip + mood chip + assistant text
+    # Everything else (vad, ws lifecycle, llm.first_sentence partials,
+    # turn.end, debug noise) is suppressed. We key on llm.done rather
+    # than turn.end so the BOT line appears the moment the LLM finishes
+    # generating — roughly when the first audio frame goes out — instead
+    # of waiting on TTS synth + opus pacing tail (~3 s later).
+    #
+    # The mood chip is parsed out of the leading "[name]" tag the LLM is
+    # prompted to emit. The tag is stripped from the displayed text so
+    # we don't render it twice. If the model dropped the tag, the chip
+    # shows "----" so it's visible as an outlier rather than absent.
+    #
+    # Speakers are differentiated three ways at once so a quick glance
+    # is enough to tell them apart even on a small terminal:
+    #   - distinct chip background (green vs magenta)
+    #   - explicit "USER"/"BOT " label, fixed width for column alignment
+    #   - message body style (default for USER, dim italic for BOT)
+    local lf="$LOG_DIR/server.log"
+    [ -f "$lf" ] || : >"$lf"
+    # Chip = bold black foreground on a bright bg, padded with spaces.
+    local user_chip=$'[1;30;102m USER [0m'  # black on bright green
+    local bot_chip=$'[1;30;105m BOT  [0m'   # black on bright magenta
+    local user_text=$'[0m'                       # default
+    local bot_text=$'[2;3m'                      # dim + italic
+    local reset=$'[0m'
+    local ts_color=$'[90m'                       # dim grey
+    # Mood chip colors: bold black on a bright background, picked to
+    # roughly evoke each mood while staying readable on any terminal theme.
+    # "----" is the no-tag fallback so a missing emotion stands out.
+    emotion_chip() {
+        local code label
+        case "$1" in
+            happy|laughing) code='103' ;; # bright yellow
+            sad|crying)     code='104' ;; # bright blue
+            angry)          code='101' ;; # bright red
+            doubtful)       code='106' ;; # bright cyan
+            neutral)        code='107' ;; # bright white
+            *)              code='100' ;; # dark grey = no tag
+        esac
+        label="$1"
+        [ -z "$label" ] && label='----'
+        printf $'\e[1;30;%sm %-8s \e[0m' "$code" "$label"
+    }
+    printf 'transcript: %s message  %s reply  %s mood  (Ctrl+C to stop)\n' \
+        "$user_chip" "$bot_chip" "$(emotion_chip happy)"
+    trap 'kill 0 2>/dev/null; exit 0' INT TERM
+    # jq emits records separated by ASCII Unit Separator (0x1f). We can't
+    # use tabs: bash's `read` with IFS=$'\t' treats tab as whitespace and
+    # collapses consecutive tabs, so an empty middle field (the emotion
+    # column for USER lines) silently swallows the text after it. ASCII
+    # 0x1f is non-whitespace, so empty fields are preserved verbatim.
+    local US=$'\x1f'
+    tail -Fn0 "$lf" 2>/dev/null \
+        | jq --unbuffered -r --arg us "$US" '
+            (.time[11:19] // "--:--:--") as $ts
+            | if   .msg == "asr.ok" then
+                "U\($us)\($ts)\($us)\($us)\(.text // "")"
+              elif .msg == "inject.text" then
+                "U\($us)\($ts)\($us)\($us)[inject] \(.text // "")"
+              elif .msg == "llm.done" then
+                # Fires the moment the LLM stream completes — ~3 s before the
+                # device finishes speaking (TTS synth + opus pacing tail).
+                (.reply // "") as $r
+                | (($r | capture("^\\s*\\[(?<emo>[a-zA-Z]+)\\]\\s*(?<rest>.*)"; "s")) // {emo: "", rest: $r}) as $m
+                | "A\($us)\($ts)\($us)\($m.emo | ascii_downcase)\($us)\($m.rest)"
+              else empty end' \
+        | while IFS="$US" read -r who ts emo text; do
+            case "$who" in
+                U) printf '%s%s%s  %s  %s%s%s\n' \
+                        "$ts_color" "$ts" "$reset" \
+                        "$user_chip" \
+                        "$user_text" "$text" "$reset" ;;
+                A) printf '%s%s%s  %s  %s  %s%s%s\n' \
+                        "$ts_color" "$ts" "$reset" \
+                        "$bot_chip" \
+                        "$(emotion_chip "$emo")" \
+                        "$bot_text" "$text" "$reset" ;;
+            esac
+        done
+}
+
+cmd_sessions() {
+    # Lists active WS sessions. Needs the server to have been started with
+    # WARBLE_DEBUG=1 — otherwise the route is not registered and curl gets 404.
+    local host port
+    host="$(svc_host server)"; port="$(svc_port server)"
+    # OTA endpoints share the second listener (default :8003, see OTA_PORT).
+    local ota_port="$OTA_PORT"
+    local resp
+    resp="$(curl -sS -m 5 -w '\n%{http_code}' "http://${host}:${ota_port}/debug/sessions")" || {
+        echo "request failed (is the server running with WARBLE_DEBUG=1?)" >&2
+        return 1
+    }
+    local code body
+    code="$(printf '%s\n' "$resp" | tail -n1)"
+    body="$(printf '%s\n' "$resp" | sed '$d')"
+    if [ "$code" != "200" ]; then
+        echo "HTTP $code: $body" >&2
+        return 1
+    fi
+    if [ "$body" = "null" ] || [ -z "$body" ]; then
+        echo "no active sessions"
+        return 0
+    fi
+    printf '%s\n' "$body" | jq -r '.[] | "\(.device_id)\t\(.session_id)\t\(.client_id)"' \
+        | awk -F'\t' 'BEGIN{printf "%-20s %-38s %-38s\n","DEVICE","SESSION","CLIENT"}
+                      {printf "%-20s %-38s %-38s\n",$1,$2,$3}'
+}
+
+cmd_say() {
+    # Usage:
+    #   warble say "text..."                  -> infers device when only one session
+    #   warble say <device-id> "text..."      -> targets a specific device
+    #   warble say --wait[=SEC] "text..."     -> poll /debug/sessions until a
+    #                                            session appears (default 60s),
+    #                                            then inject. Lets you start
+    #                                            the command before waking the
+    #                                            robot, so the inject lands the
+    #                                            instant the device connects.
+    local host port ota_port
+    host="$(svc_host server)"; port="$(svc_port server)"; ota_port="$OTA_PORT"
+    local device='' text='' wait_secs=0
+    if [ $# -lt 1 ]; then
+        echo "usage: warble say [--wait[=SEC]] [device-id] \"text...\"" >&2
+        return 2
+    fi
+    # Optional --wait flag.
+    if printf '%s' "$1" | grep -qE '^--wait(=[0-9]+)?$'; then
+        if printf '%s' "$1" | grep -q '='; then
+            wait_secs="${1#--wait=}"
+        else
+            wait_secs=60
+        fi
+        shift
+    fi
+    # If the first arg looks like a MAC, treat as device id; else it's text.
+    if [ $# -ge 2 ] && printf '%s' "$1" | grep -qE '^[0-9a-fA-F:]{17}$'; then
+        device="$1"; shift
+    fi
+    text="$*"
+    if [ -z "$text" ]; then
+        echo "missing text" >&2
+        return 2
+    fi
+    # If --wait, poll /debug/sessions until at least one is alive (or the target
+    # device is alive when device-id was specified). 200 ms cadence so we don't
+    # miss a sub-second connection window.
+    if [ "$wait_secs" -gt 0 ]; then
+        local deadline=$(( $(date +%s) + wait_secs ))
+        echo "waiting up to ${wait_secs}s for an active session... (Ctrl+C to bail)"
+        while [ "$(date +%s)" -lt "$deadline" ]; do
+            local list
+            list="$(curl -sS -m 2 "http://${host}:${ota_port}/debug/sessions" 2>/dev/null || true)"
+            if [ -n "$list" ] && [ "$list" != "[]" ] && [ "$list" != "null" ]; then
+                if [ -z "$device" ]; then
+                    break
+                fi
+                if printf '%s' "$list" | jq -e --arg d "$device" 'map(.device_id) | index($d)' >/dev/null; then
+                    break
+                fi
+            fi
+            sleep 0.2
+        done
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "timed out waiting for session" >&2
+            return 1
+        fi
+    fi
+    local payload
+    payload="$(jq -nc --arg d "$device" --arg t "$text" '{device_id:$d, text:$t}')"
+    local resp code body
+    resp="$(curl -sS -m 5 -w '\n%{http_code}' \
+        -H 'Content-Type: application/json' \
+        -d "$payload" \
+        "http://${host}:${ota_port}/debug/say")" || {
+        echo "request failed (is the server running with WARBLE_DEBUG=1?)" >&2
+        return 1
+    }
+    code="$(printf '%s\n' "$resp" | tail -n1)"
+    body="$(printf '%s\n' "$resp" | sed '$d')"
+    if [ "$code" != "202" ]; then
+        echo "HTTP $code: $body" >&2
+        return 1
+    fi
+    printf '%s\n' "$body" | jq -r '"queued to \(.device_id) (\(.session_id))"'
+}
+
+cmd_babysit() {
+    # Auto-restart a service if it dies. Ctrl+C to exit.
+    local svc="${1:-server}"
+    local label; label="$(color_svc "$svc" "$svc")"
+    echo "babysitting $label (interval 10s). Ctrl+C to stop."
+    trap 'echo; echo "babysit stopped."; exit 0' INT TERM
+    while :; do
+        if ! is_running "$svc"; then
+            echo "$(date '+%H:%M:%S') $label down, restarting..."
+            start_one "$svc"
+        fi
+        sleep 10
+    done
+}
+
+usage() {
+    local w p v l o
+    w="$(color_svc whisper whisper)"
+    p="$(color_svc piper   piper)"
+    v="$(color_svc vad     vad)"
+    l="$(color_svc server  server)"
+    o="$(color_svc ollama  ollama)"
+    cat <<EOF
+usage: warble <command> [service]
+
+services: $w $p $v $l   (direct)
+          $o                   (per OLLAMA_MODE: external|serve|brew)
+
+commands:
+  status [svc|all]   show all services (default) or one
+  start  [svc|all]   start service(s); adopts already-listening orphans
+  stop   [svc|all]   SIGTERM then SIGKILL after 7.5s
+  restart [svc|all]
+  logs   [svc|all]   tail -F one log, or all logs interleaved with a colored prefix (default: all)
+  transcript         tail server.log and show only > queries and < replies
+  babysit [svc]      poll every 10s, restart if dead (default: $l)
+  sessions           list active WS sessions (requires server started with WARBLE_DEBUG=1)
+  say [device] TEXT  inject TEXT as a user turn into the active session
+                     (requires server started with WARBLE_DEBUG=1)
+
+paths:
+  pidfiles  $RUN_DIR
+  logs      $LOG_DIR
+  ollama    $OLLAMA_LOG
+EOF
+}
+
+case "${1:-}" in
+    status)   shift; cmd_status "$@" ;;
+    start)    shift; cmd_start "$@" ;;
+    stop)     shift; cmd_stop "$@" ;;
+    restart)  shift; cmd_restart "$@" ;;
+    logs)     shift; cmd_logs "$@" ;;
+    transcript) shift; cmd_transcript "$@" ;;
+    babysit)  shift; cmd_babysit "$@" ;;
+    sessions) shift; cmd_sessions "$@" ;;
+    say)      shift; cmd_say "$@" ;;
+    ""|-h|--help|help) usage ;;
+    *) echo "unknown command: $1" >&2; usage >&2; exit 2 ;;
+esac

@@ -1,0 +1,9 @@
+# Piper TTS shim dependencies.
+#
+# piper-tts is the OHF-Voice/piper1-gpl engine and is GPL-3.0 licensed. It runs
+# here as a separate, user-installed program reached over HTTP; warble's own code
+# stays MIT. Do not vendor piper-tts source/binaries into a redistributed artifact
+# without satisfying GPL-3.0. See ../THIRD_PARTY_LICENSES.md.
+fastapi
+uvicorn[standard]
+piper-tts

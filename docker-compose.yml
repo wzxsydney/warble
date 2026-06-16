@@ -1,0 +1,127 @@
+# warble full local stack.
+#
+# Easiest: run ./warble start  (handles models, build, startup, model pull, and
+# the macOS/Linux Ollama difference). Check status with ./warble status.
+#
+# Manual equivalents, if you prefer raw compose:
+#   docker compose up -d --build --wait                    # server + whisper + piper + vad
+#   docker compose --profile ollama up -d --build --wait   # also run Ollama in a container
+#
+# Then point the device at this host:
+#   nvs-tool/switch_backend.sh http://<this-host-LAN-IP>:8003/xiaozhi/ota/
+#
+# Fetch models first:  scripts/fetch-models.sh   (writes into ./models)
+#
+# Ollama notes:
+#   - Linux with an NVIDIA GPU: use the `ollama` profile and uncomment the GPU
+#     `deploy` block below (needs the NVIDIA Container Toolkit).
+#   - macOS: Docker cannot use the Apple GPU. Run Ollama natively (`ollama serve`,
+#     Metal-accelerated), skip the `ollama` profile, and set in .env:
+#         WARBLE_OLLAMA_URL=http://host.docker.internal:11434
+
+services:
+  whisper:
+    build:
+      context: ./docker
+      dockerfile: whisper.Dockerfile
+    command: >
+      -m /models/whisper/${WHISPER_MODEL_FILE:-ggml-base.bin}
+      -l ${WHISPER_LANG:-auto}
+      --host 0.0.0.0 --port 8082 -bs 5 -bo 5
+    volumes:
+      - ./models:/models:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -X OPTIONS http://localhost:8082/inference || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 90s
+    restart: unless-stopped
+
+  piper:
+    build:
+      context: ./piper-shim
+    environment:
+      PIPER_DEFAULT_VOICE: ${PIPER_VOICE:-en_US-lessac-medium}
+      PIPER_VOICES_DIR: /voices
+    volumes:
+      - ./models/piper:/voices:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/docs || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    restart: unless-stopped
+
+  vad:
+    build:
+      context: ./vad-shim
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8005/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    restart: unless-stopped
+    # NVIDIA GPU passthrough: uncomment (needs the NVIDIA Container Toolkit).
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  server:
+    build:
+      context: ./server
+    depends_on:
+      whisper:
+        condition: service_healthy
+      piper:
+        condition: service_healthy
+      vad:
+        condition: service_healthy
+    environment:
+      WARBLE_WHISPER_URL: http://whisper:8082/inference
+      WARBLE_PIPER_URL: http://piper:8001/v1/audio/speech
+      WARBLE_VAD_URL: ws://vad:8005/vad
+      WARBLE_OLLAMA_URL: ${WARBLE_OLLAMA_URL:-http://ollama:11434}
+      WARBLE_CONFIG_DIR: /app/config
+      # REQUIRED in Docker: the server runs in a container and cannot auto-detect
+      # the host's LAN IP, so it must be told the address the device should connect
+      # to for the audio WebSocket. Empty falls back to (wrong-in-Docker) auto-detect.
+      # './warble start' fills this in; or set WARBLE_WS_URL in .env to ws://<LAN-IP>:8000/xiaozhi/v1/
+      WARBLE_WS_URL: ${WARBLE_WS_URL:-}
+      # WARBLE_DEBUG: "1"   # enable /debug/sessions + /debug/say on :8003
+    volumes:
+      - ./server/config:/app/config
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -X POST http://localhost:8003/xiaozhi/ota/ -H 'Device-Id: aa:bb:cc:dd:ee:ff' -H 'Client-Id: healthcheck' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"   # WebSocket (device audio stream)
+      - "8003:8003"   # OTA bootstrap + debug endpoints
+    restart: unless-stopped
+
+volumes:
+  ollama:

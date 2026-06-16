@@ -1,0 +1,7 @@
+{
+  "piper_voice": "en_US-lessac-medium",
+  "ollama_model": "gemma3:4b",
+  "temperature": 0.6,
+  "top_p": 0.9,
+  "num_predict": 80
+}

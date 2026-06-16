@@ -1,0 +1,6 @@
+# Silero VAD WebSocket sidecar dependencies. All MIT/permissive.
+fastapi
+uvicorn[standard]
+silero-vad
+onnxruntime
+numpy

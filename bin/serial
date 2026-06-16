@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# StackChan serial-log helper.
+#
+# Subcommands:
+#   tail      stream device log to stdout (interactive; Ctrl+C to stop)
+#   bg       start a background `cat` writing to /tmp/stackchan.log
+#   stop     kill the background tail and free the port
+#   watch    `tail -F` /tmp/stackchan.log (assumes `bg` is running)
+#   monitor  run esp-idf-monitor (panic decoding, auto-reconnect on CDC drop)
+#   port     print the detected port (sanity check)
+#
+# Why two patterns: idf-monitor needs a TTY on stdin so it can only run in the
+# foreground. For unattended capture or for an agent reading the log file, use
+# `bg` (stty + cat) which restarts trivially when the device reboots.
+
+set -u
+
+PORT="${STACKCHAN_PORT:-/dev/cu.usbmodem1101}"
+LOG_FILE="${STACKCHAN_LOG:-/tmp/stackchan.log}"
+PID_FILE="/tmp/stackchan-serial.pid"
+
+usage() {
+    sed -n '2,16p' "$0"
+    exit 2
+}
+
+check_port() {
+    if [ ! -e "$PORT" ]; then
+        echo "no device at $PORT (cable? data-only USB-C?)" >&2
+        return 1
+    fi
+}
+
+free_port() {
+    local pids
+    pids="$(lsof -t "$PORT" 2>/dev/null)"
+    if [ -n "$pids" ]; then
+        echo "freeing $PORT (killing pid: $pids)" >&2
+        kill $pids 2>/dev/null
+        sleep 0.3
+    fi
+}
+
+cmd_tail() {
+    check_port || exit 1
+    free_port
+    stty -f "$PORT" 115200 cs8 -cstopb -parenb -ixon raw 2>/dev/null
+    echo "tailing $PORT (Ctrl+C to stop)" >&2
+    exec cat "$PORT"
+}
+
+cmd_bg() {
+    check_port || exit 1
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "already running (pid $(cat "$PID_FILE")); writing to $LOG_FILE" >&2
+        return 0
+    fi
+    free_port
+    stty -f "$PORT" 115200 cs8 -cstopb -parenb -ixon raw 2>/dev/null
+    nohup cat "$PORT" >>"$LOG_FILE" 2>&1 </dev/null &
+    echo $! >"$PID_FILE"
+    echo "started (pid $(cat "$PID_FILE")); writing to $LOG_FILE" >&2
+    echo "  watch with: $(basename "$0") watch" >&2
+}
+
+cmd_stop() {
+    if [ -f "$PID_FILE" ]; then
+        local pid; pid="$(cat "$PID_FILE")"
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            echo "stopped pid $pid" >&2
+        fi
+        rm -f "$PID_FILE"
+    fi
+    free_port
+}
+
+cmd_watch() {
+    if [ ! -f "$LOG_FILE" ]; then
+        echo "no log at $LOG_FILE — start it with: $(basename "$0") bg" >&2
+        exit 1
+    fi
+    exec tail -F "$LOG_FILE"
+}
+
+cmd_monitor() {
+    check_port || exit 1
+    free_port
+    if ! command -v idf-monitor >/dev/null 2>&1; then
+        echo "idf-monitor not on PATH. Install: pipx install esp-idf-monitor" >&2
+        exit 1
+    fi
+    exec idf-monitor --port "$PORT" --baud 115200 --no-reset \
+        --decode-coredumps disable --decode-panic disable --disable-address-decoding
+}
+
+cmd_port() {
+    echo "$PORT"
+    if [ -e "$PORT" ]; then echo "  exists"; else echo "  NOT FOUND"; fi
+}
+
+case "${1:-}" in
+    tail)    cmd_tail ;;
+    bg)      cmd_bg ;;
+    stop)    cmd_stop ;;
+    watch)   cmd_watch ;;
+    monitor) cmd_monitor ;;
+    port)    cmd_port ;;
+    -h|--help|help|"") usage ;;
+    *) echo "unknown subcommand: $1" >&2; usage ;;
+esac

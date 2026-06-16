@@ -1,0 +1,7 @@
+bin/
+*:*/
+qwen*/
+hf.co/
+jobautomation/
+config/prompt.txt
+config/runtime.json
