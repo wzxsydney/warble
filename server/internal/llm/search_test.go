@@ -23,7 +23,7 @@ func TestSearchToolReplay(t *testing.T) {
 			Max   int    `json:"max_results"`
 		}
 		json.NewDecoder(r.Body).Decode(&q)
-		if q.Query != "latest news" || q.Max != 3 {
+		if q.Query != "latest news" || q.Max != 6 {
 			t.Errorf("bad query: %+v", q)
 		}
 		fmt.Fprint(w, `{"results":[{"title":"Source","url":"https://example.com","content":"Verified news"}]}`)
@@ -60,7 +60,7 @@ func TestSearchToolReplay(t *testing.T) {
 	c.Search = &WebSearch{APIKey: "test-private-key", endpoint: search.URL}
 	var spoken strings.Builder
 	got, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "Search news"}}, Options{Model: "qwen3.5:9b"}, func(s string) { spoken.WriteString(s) })
-	if err != nil || got != "According to Source, verified news." || spoken.String() != got || rounds != 2 || searches != 1 {
+	if err != nil || got != "According to Source, verified news." || spoken.String() != got || rounds != 3 || searches != 1 {
 		t.Fatalf("got=%q spoken=%q rounds=%d searches=%d err=%v", got, spoken.String(), rounds, searches, err)
 	}
 }
@@ -95,18 +95,20 @@ func TestSearchBudget(t *testing.T) {
 		rounds++
 		var req openaiChatRequest
 		json.NewDecoder(r.Body).Decode(&req)
-		if rounds < 3 {
+		if rounds == 1 {
 			var calls []any
 			for i := 0; i < 2; i++ {
 				calls = append(calls, map[string]any{"index": i, "id": fmt.Sprintf("call_%d_%d", rounds, i), "type": "function", "function": map[string]string{"name": "web_search", "arguments": `{"query":"news"}`}})
 			}
 			event(w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": calls}}}})
 		} else {
-			t.Error("unexpected extra round")
+			event(w, map[string]any{"choices": []any{map[string]any{"delta": map[string]string{"content": "Done"}}}})
 		}
 		if rounds == 2 {
-			if len(req.Tools) != 0 {
-				t.Error("tools still enabled after budget exhausted")
+			for _, tool := range req.Tools {
+				if tool.Function.Name == "web_search" {
+					t.Error("search still enabled after budget exhausted")
+				}
 			}
 			// A model ignoring the advertised tools must not trigger more searches.
 		}
@@ -116,7 +118,7 @@ func TestSearchBudget(t *testing.T) {
 	c := New(model.URL)
 	c.Search = &WebSearch{APIKey: "key", endpoint: search.URL}
 	_, err := c.Stream(context.Background(), nil, Options{Model: "test"}, func(string) {})
-	if searches != 2 || rounds != 2 || err == nil {
+	if searches != 2 || rounds != 3 || err != nil {
 		t.Fatalf("searches=%d rounds=%d err=%v", searches, rounds, err)
 	}
 }

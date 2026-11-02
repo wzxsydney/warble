@@ -171,10 +171,11 @@ web search is disabled and existing chat behavior is unchanged. The startup log
 A tool-capable model is required (for example Qwen3.5). Reasoning remains disabled.
 Ask “Search the web for today's latest space news” to try it.
 
-Each voice turn allows at most two searches with three results each. Requests
+Each voice turn allows at most two searches with six results each and three
+public-page reads over four planning rounds. Requests
 have a ten-second timeout, and the model is told to explain failed searches.
-Search snippets are treated as untrusted evidence. A separate tool-selection
-request runs before the final answer streams to speech, which can increase
+Search snippets are treated as untrusted evidence. Separate tool-selection
+requests can refine queries and read result pages before the final answer streams to speech, which can increase
 the delay before the first audio. The voice persona is applied only to the
 final answer so emotion-tag instructions do not interfere with tool calls.
 Remove the key and restart to disable the feature.
@@ -188,3 +189,17 @@ For SearXNG in another Compose stack, attach only Warble's `server` service to
 that stack's existing search network using a local Compose override. Keep its
 normal default network too, so it can still reach Whisper, Piper and VAD.
 Rebuild and recreate the server after changing configuration.
+
+
+Search planning can now read public result pages and refine a query when snippets
+lack facts. Page requests are limited to URLs returned during the current turn,
+with redirects and DNS checked to block private-network addresses. JavaScript-only
+or blocked pages may still be unreadable.
+
+For latest EPL scores, the `football_scores` tool reads ESPN's public scoreboard
+for up to eight recent UTC dates. It excludes scheduled games and speaks up to
+three completed scorelines directly from the feed, preserving team-score pairs
+and dates. It requires no ESPN key. This endpoint is a public ESPN feed rather
+than a guaranteed supported developer API; if unavailable, the assistant can try
+web search. Other leagues currently use general web search. The feed lookup has
+a fifteen-second overall timeout.
