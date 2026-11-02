@@ -70,7 +70,8 @@ type openaiChatRequest struct {
 	// model in memory after the request. "24h" effectively means "forever"
 	// for a single-device kiosk; the alternative is Ollama's 5 min default
 	// which we'd pay every time the user is idle for >5 min.
-	KeepAlive string `json:"keep_alive,omitempty"`
+	KeepAlive       string `json:"keep_alive,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 const keepAliveForever = "24h"
@@ -89,14 +90,15 @@ type openaiChunk struct {
 // the stream ends or ctx is cancelled. Returns the full accumulated text.
 func (c *Client) Stream(ctx context.Context, messages []Message, opts Options, onToken func(string)) (string, error) {
 	req := openaiChatRequest{
-		Model:         opts.Model,
-		Messages:      messages,
-		Stream:        true,
-		Temperature:   opts.Temperature,
-		TopP:          opts.TopP,
-		MaxTokens:     opts.NumPredict,
-		RepeatPenalty: 1.0,
-		KeepAlive:     keepAliveForever,
+		Model:           opts.Model,
+		Messages:        messages,
+		Stream:          true,
+		Temperature:     opts.Temperature,
+		TopP:            opts.TopP,
+		MaxTokens:       opts.NumPredict,
+		RepeatPenalty:   1.0,
+		KeepAlive:       keepAliveForever,
+		ReasoningEffort: "none",
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
