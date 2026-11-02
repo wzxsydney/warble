@@ -47,6 +47,7 @@ func main() {
 		WhisperURL:   cfg.WhisperURL,
 		OllamaURL:    cfg.OllamaURL,
 		OllamaAPIKey: cfg.OllamaAPIKey,
+		SearXNGURL:   cfg.SearXNGURL,
 		PiperURL:     cfg.PiperURL,
 		Loader:       loader,
 	}, log)

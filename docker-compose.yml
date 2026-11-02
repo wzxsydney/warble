@@ -109,6 +109,7 @@ services:
       WARBLE_PIPER_URL: http://piper:8001/v1/audio/speech
       WARBLE_VAD_URL: ws://vad:8005/vad
       WARBLE_OLLAMA_URL: ${WARBLE_OLLAMA_URL:-http://ollama:11434}
+      WARBLE_SEARXNG_URL: ${WARBLE_SEARXNG_URL:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       WARBLE_CONFIG_DIR: /app/config
       # REQUIRED in Docker: the server runs in a container and cannot auto-detect

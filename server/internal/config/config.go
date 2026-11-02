@@ -19,6 +19,7 @@ type Config struct {
 	WhisperURL   string
 	OllamaURL    string
 	OllamaAPIKey string
+	SearXNGURL   string
 	PiperURL     string
 	ConfigDir    string // dir holding prompt.txt + runtime.json (hot-reloadable)
 
@@ -45,6 +46,7 @@ func Default() Config {
 		WhisperURL:   envOr("WARBLE_WHISPER_URL", "http://127.0.0.1:8082/inference"),
 		OllamaURL:    envOr("WARBLE_OLLAMA_URL", "http://127.0.0.1:11434"),
 		PiperURL:     envOr("WARBLE_PIPER_URL", "http://127.0.0.1:8001/v1/audio/speech"),
+		SearXNGURL:   envOr("WARBLE_SEARXNG_URL", ""),
 		OllamaAPIKey: envOr("OLLAMA_API_KEY", ""),
 		ConfigDir:    envOr("WARBLE_CONFIG_DIR", "./config"),
 

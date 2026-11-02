@@ -140,3 +140,23 @@ func TestDisabledSearchStreamsImmediately(t *testing.T) {
 		t.Fatalf("got=%q chunks=%v err=%v", got, chunks, err)
 	}
 }
+
+func TestSearXNGWithoutAPIKey(t *testing.T) {
+	called := false
+	search := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.Method != "GET" || r.URL.Query().Get("q") != "hello & world" || r.URL.Query().Get("format") != "json" {
+			t.Errorf("bad request: %s", r.URL)
+		}
+		if r.Header.Get("Authorization") != "" {
+			t.Error("Ollama key sent to SearXNG")
+		}
+		fmt.Fprint(w, `{"results":[{"title":"Example","url":"https://example.com","content":"Result"}]}`)
+	}))
+	defer search.Close()
+	s := &WebSearch{SearXNGURL: search.URL + "/search", APIKey: "must-not-send"}
+	got := s.search(context.Background(), `{"query":"hello & world"}`)
+	if !called || !strings.Contains(got, "Result") {
+		t.Fatal(got)
+	}
+}

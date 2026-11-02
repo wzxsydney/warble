@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -33,9 +34,10 @@ type Tool struct {
 // WebSearch sends only the model's search query to Ollama's hosted search API.
 // The key is never sent to the local inference server or included in errors.
 type WebSearch struct {
-	APIKey   string
-	HTTP     *http.Client
-	endpoint string // overridden by package tests only
+	SearXNGURL string
+	APIKey     string
+	HTTP       *http.Client
+	endpoint   string // overridden by package tests only
 }
 
 func (w *WebSearch) search(ctx context.Context, arguments string) string {
@@ -52,11 +54,27 @@ func (w *WebSearch) search(ctx context.Context, arguments string) string {
 	if endpoint == "" {
 		endpoint = "https://ollama.com/api/web_search"
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	var req *http.Request
+	var err error
+	if w.SearXNGURL != "" {
+		endpoint, parseErr := url.Parse(w.SearXNGURL)
+		if parseErr != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Host == "" || endpoint.User != nil {
+			return `{"error":"Invalid SearXNG URL."}`
+		}
+		query := endpoint.Query()
+		query.Set("q", args.Query)
+		query.Set("format", "json")
+		endpoint.RawQuery = query.Encode()
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	} else {
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+w.APIKey)
+		}
+	}
 	if err != nil {
 		return `{"error":"Web search unavailable."}`
 	}
-	req.Header.Set("Authorization", "Bearer "+w.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 	client := w.HTTP
 	if client == nil {
@@ -70,8 +88,8 @@ func (w *WebSearch) search(ctx context.Context, arguments string) string {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Sprintf(`{"error":"Web search failed (HTTP %d). Do not claim current information was verified."}`, resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 128*1024+1))
-	if err != nil || len(data) > 128*1024 {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024+1))
+	if err != nil || len(data) > 2*1024*1024 {
 		return `{"error":"Invalid search response."}`
 	}
 	var results struct {
@@ -108,7 +126,7 @@ func clip(s string, n int) string {
 // Stream allows at most two searches per turn, then streams the final answer.
 // Tool-selection text is buffered so a discarded preamble never reaches TTS.
 func (c *Client) Stream(ctx context.Context, messages []Message, opts Options, onToken func(string)) (string, error) {
-	if c.Search == nil || c.Search.APIKey == "" {
+	if c.Search == nil || (c.Search.APIKey == "" && c.Search.SearXNGURL == "") {
 		answer, err := c.streamOnce(ctx, messages, opts, nil, onToken)
 		return answer.Content, err
 	}

@@ -176,3 +176,13 @@ have a ten-second timeout, and the model is told to explain failed searches.
 Search snippets are treated as untrusted evidence. Tool-selection output is
 buffered before speech, which can increase the delay before the first audio.
 Remove the key and restart to disable the feature.
+
+#### Use an existing SearXNG instance
+
+Set `WARBLE_SEARXNG_URL=http://searxng:8080/search` in your ignored `.env`
+(or export it in `warble.env` for bare metal). This takes priority over Ollama
+search and needs no Ollama API key. Enable JSON output in SearXNG settings.
+For SearXNG in another Compose stack, attach only Warble's `server` service to
+that stack's existing search network using a local Compose override. Keep its
+normal default network too, so it can still reach Whisper, Piper and VAD.
+Rebuild and recreate the server after changing configuration.
