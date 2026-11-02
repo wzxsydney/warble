@@ -21,8 +21,9 @@ import (
 )
 
 type Client struct {
-	URL  string // e.g. http://127.0.0.1:11434
-	HTTP *http.Client
+	URL    string // e.g. http://127.0.0.1:11434
+	Search *WebSearch
+	HTTP   *http.Client
 }
 
 func New(url string) *Client {
@@ -37,8 +38,10 @@ func New(url string) *Client {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
 // Options carries per-call model + sampling params so callers can pass a
@@ -56,6 +59,7 @@ type Options struct {
 // uses top-level sampling fields (not nested "options"), keep_alive
 // (Ollama extension, optional), and stream.
 type openaiChatRequest struct {
+	Tools       []Tool    `json:"tools,omitempty"`
 	Model       string    `json:"model"`
 	Messages    []Message `json:"messages"`
 	Stream      bool      `json:"stream"`
@@ -80,16 +84,19 @@ const keepAliveForever = "24h"
 type openaiChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content   string     `json:"content"`
+			ToolCalls []ToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 }
 
-// Stream sends a chat request and yields content tokens to onToken until
-// the stream ends or ctx is cancelled. Returns the full accumulated text.
-func (c *Client) Stream(ctx context.Context, messages []Message, opts Options, onToken func(string)) (string, error) {
+// streamOnce consumes one completion, accumulating fragmented tool calls.
+func (c *Client) streamOnce(ctx context.Context, messages []Message, opts Options, tools []Tool, onToken func(string)) (Message, error) {
+	var answer Message
+	answer.Role = "assistant"
 	req := openaiChatRequest{
+		Tools:           tools,
 		Model:           opts.Model,
 		Messages:        messages,
 		Stream:          true,
@@ -102,25 +109,25 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts Options, o
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", err
+		return answer, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return answer, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 
 	resp, err := c.HTTP.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("ollama: %w", err)
+		return answer, fmt.Errorf("ollama: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("ollama status=%d body=%s", resp.StatusCode, buf)
+		return answer, fmt.Errorf("ollama status=%d body=%s", resp.StatusCode, buf)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -143,22 +150,50 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts Options, o
 		}
 		var chunk openaiChunk
 		if err := json.Unmarshal(payload, &chunk); err != nil {
-			return full.String(), fmt.Errorf("parse chunk: %w (line=%s)", err, line)
+			answer.Content = full.String()
+			return answer, fmt.Errorf("parse chunk: %w (line=%s)", err, line)
 		}
 		for _, ch := range chunk.Choices {
+			for _, delta := range ch.Delta.ToolCalls {
+				if delta.Index < 0 || delta.Index >= 4 {
+					return answer, fmt.Errorf("invalid tool call index")
+				}
+				for len(answer.ToolCalls) <= delta.Index {
+					answer.ToolCalls = append(answer.ToolCalls, ToolCall{})
+				}
+				call := &answer.ToolCalls[delta.Index]
+				call.ID += delta.ID
+				call.Type = "function"
+				call.Function.Name += delta.Function.Name
+				call.Function.Arguments += delta.Function.Arguments
+				if len(call.Function.Arguments) > 16*1024 || len(call.Function.Name) > 128 || len(call.ID) > 256 {
+					return answer, fmt.Errorf("tool call exceeds size limit")
+				}
+			}
 			if ch.Delta.Content != "" {
 				full.WriteString(ch.Delta.Content)
-				onToken(ch.Delta.Content)
+				if len(tools) == 0 {
+					onToken(ch.Delta.Content)
+				}
 			}
 		}
 		if ctx.Err() != nil {
-			return full.String(), ctx.Err()
+			answer.Content = full.String()
+			return answer, ctx.Err()
 		}
 	}
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
-		return full.String(), fmt.Errorf("scan: %w", err)
+		answer.Content = full.String()
+		return answer, fmt.Errorf("scan: %w", err)
 	}
-	return full.String(), nil
+	answer.Content = full.String()
+	if ctx.Err() != nil {
+		return answer, ctx.Err()
+	}
+	if len(tools) > 0 && len(answer.ToolCalls) == 0 {
+		onToken(answer.Content)
+	}
+	return answer, nil
 }
 
 // openaiNonStreaming is the response shape when stream=false.

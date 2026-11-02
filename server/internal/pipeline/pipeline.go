@@ -53,16 +53,22 @@ type Pipeline struct {
 }
 
 type Config struct {
-	WhisperURL string
-	OllamaURL  string
-	PiperURL   string
-	Loader     *configloader.Loader
+	WhisperURL   string
+	OllamaURL    string
+	OllamaAPIKey string
+	PiperURL     string
+	Loader       *configloader.Loader
 }
 
 func New(cfg Config, log *slog.Logger) *Pipeline {
+	client := llm.New(cfg.OllamaURL)
+	if cfg.OllamaAPIKey != "" {
+		client.Search = &llm.WebSearch{APIKey: cfg.OllamaAPIKey}
+	}
+	log.Info("web_search.config", "enabled", cfg.OllamaAPIKey != "")
 	return &Pipeline{
 		asr: asr.New(cfg.WhisperURL),
-		llm: llm.New(cfg.OllamaURL),
+		llm: client,
 		tts: tts.New(cfg.PiperURL),
 		log: log,
 		cfg: cfg.Loader,

@@ -16,10 +16,11 @@ type Config struct {
 	WSURLOverride  string // if set, OTA returns this instead of computing
 	TimezoneOffset int    // minutes
 
-	WhisperURL string
-	OllamaURL  string
-	PiperURL   string
-	ConfigDir  string // dir holding prompt.txt + runtime.json (hot-reloadable)
+	WhisperURL   string
+	OllamaURL    string
+	OllamaAPIKey string
+	PiperURL     string
+	ConfigDir    string // dir holding prompt.txt + runtime.json (hot-reloadable)
 
 	// VAD sidecar (Silero). Empty disables server-side end-of-speech detection;
 	// in that case the device must send listen.stop itself (manual/PTT mode).
@@ -41,10 +42,11 @@ func Default() Config {
 		WSURLOverride:  envOr("WARBLE_WS_URL", ""),
 		TimezoneOffset: 0, // minutes east of UTC; set for your locale (e.g. 60 = UTC+1)
 
-		WhisperURL: envOr("WARBLE_WHISPER_URL", "http://127.0.0.1:8082/inference"),
-		OllamaURL:  envOr("WARBLE_OLLAMA_URL", "http://127.0.0.1:11434"),
-		PiperURL:   envOr("WARBLE_PIPER_URL", "http://127.0.0.1:8001/v1/audio/speech"),
-		ConfigDir:  envOr("WARBLE_CONFIG_DIR", "./config"),
+		WhisperURL:   envOr("WARBLE_WHISPER_URL", "http://127.0.0.1:8082/inference"),
+		OllamaURL:    envOr("WARBLE_OLLAMA_URL", "http://127.0.0.1:11434"),
+		PiperURL:     envOr("WARBLE_PIPER_URL", "http://127.0.0.1:8001/v1/audio/speech"),
+		OllamaAPIKey: envOr("OLLAMA_API_KEY", ""),
+		ConfigDir:    envOr("WARBLE_CONFIG_DIR", "./config"),
 
 		VADURL:          envOr("WARBLE_VAD_URL", "ws://127.0.0.1:8005/vad"),
 		VADMinSilenceMS: envIntOr("WARBLE_VAD_MIN_SILENCE_MS", 600),

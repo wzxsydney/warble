@@ -152,3 +152,27 @@ docs ([WebSocket](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.m
 ## Contributing
 
 Issues and PRs welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+### Optional web search with local inference
+
+Set `OLLAMA_API_KEY` on the machine running the Warble server to enable the
+`web_search` tool. Create a key at https://ollama.com/settings/keys.
+Your LLM still runs on your configured local Ollama server; only model-generated
+search queries are sent to Ollama's hosted web-search service.
+
+- Docker: put `OLLAMA_API_KEY=...` in the ignored `.env` file, then run
+  `docker compose up -d --build server`.
+- Bare metal: put `export OLLAMA_API_KEY=...` in the ignored `warble.env`, then run
+  `bin/warble restart server` (the launcher rebuilds the server) from the repository root.
+
+Never put the real key in the example files or commit it. With an empty key,
+web search is disabled and existing chat behavior is unchanged. The startup log
+`web_search.config` reports whether the feature is enabled without printing the key.
+A tool-capable model is required (for example Qwen3.5). Reasoning remains disabled.
+Ask “Search the web for today's latest space news” to try it.
+
+Each voice turn allows at most two searches with three results each. Requests
+have a ten-second timeout, and the model is told to explain failed searches.
+Search snippets are treated as untrusted evidence. Tool-selection output is
+buffered before speech, which can increase the delay before the first audio.
+Remove the key and restart to disable the feature.

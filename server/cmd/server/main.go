@@ -44,10 +44,11 @@ func main() {
 	}
 
 	pipe := pipeline.New(pipeline.Config{
-		WhisperURL: cfg.WhisperURL,
-		OllamaURL:  cfg.OllamaURL,
-		PiperURL:   cfg.PiperURL,
-		Loader:     loader,
+		WhisperURL:   cfg.WhisperURL,
+		OllamaURL:    cfg.OllamaURL,
+		OllamaAPIKey: cfg.OllamaAPIKey,
+		PiperURL:     cfg.PiperURL,
+		Loader:       loader,
 	}, log)
 
 	// Re-warm on prompt or model change so the next turn after a config
