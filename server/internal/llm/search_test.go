@@ -160,3 +160,32 @@ func TestSearXNGWithoutAPIKey(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestPlannerSeparateFromVoicePersona(t *testing.T) {
+	rounds := 0
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rounds++
+		var req openaiChatRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		if rounds == 1 {
+			if strings.Contains(req.Messages[0].Content, "Every reply must begin") {
+				t.Error("voice persona leaked into tool planner")
+			}
+			event(w, map[string]any{"choices": []any{map[string]any{"delta": map[string]string{"content": "NO_SEARCH"}}}})
+		} else {
+			if !strings.Contains(req.Messages[0].Content, "Every reply must begin") || len(req.Tools) != 0 {
+				t.Error("final answer lost persona or still exposes tools")
+			}
+			event(w, map[string]any{"choices": []any{map[string]any{"delta": map[string]string{"content": "[happy] Hello!"}}}})
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer model.Close()
+	c := New(model.URL)
+	c.Search = &WebSearch{SearXNGURL: "http://unused/search"}
+	var spoken strings.Builder
+	got, err := c.Stream(context.Background(), []Message{{Role: "system", Content: "Every reply must begin with an emotion tag."}, {Role: "user", Content: "Hello"}}, Options{Model: "test"}, func(s string) { spoken.WriteString(s) })
+	if err != nil || got != "[happy] Hello!" || spoken.String() != got || rounds != 2 {
+		t.Fatalf("got=%q spoken=%q rounds=%d err=%v", got, spoken.String(), rounds, err)
+	}
+}

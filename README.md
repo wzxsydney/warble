@@ -173,8 +173,10 @@ Ask “Search the web for today's latest space news” to try it.
 
 Each voice turn allows at most two searches with three results each. Requests
 have a ten-second timeout, and the model is told to explain failed searches.
-Search snippets are treated as untrusted evidence. Tool-selection output is
-buffered before speech, which can increase the delay before the first audio.
+Search snippets are treated as untrusted evidence. A separate tool-selection
+request runs before the final answer streams to speech, which can increase
+the delay before the first audio. The voice persona is applied only to the
+final answer so emotion-tag instructions do not interfere with tool calls.
 Remove the key and restart to disable the feature.
 
 #### Use an existing SearXNG instance

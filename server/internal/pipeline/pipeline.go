@@ -64,7 +64,7 @@ type Config struct {
 func New(cfg Config, log *slog.Logger) *Pipeline {
 	client := llm.New(cfg.OllamaURL)
 	if cfg.OllamaAPIKey != "" || cfg.SearXNGURL != "" {
-		client.Search = &llm.WebSearch{APIKey: cfg.OllamaAPIKey, SearXNGURL: cfg.SearXNGURL}
+		client.Search = &llm.WebSearch{APIKey: cfg.OllamaAPIKey, SearXNGURL: cfg.SearXNGURL, Logger: log}
 	}
 	log.Info("web_search.config", "enabled", client.Search != nil)
 	return &Pipeline{
